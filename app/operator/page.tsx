@@ -34,12 +34,16 @@ interface BookingReport {
 
 export default function OperatorPortal() {
   const [authenticated, setAuthenticated] = useState(false)
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotSent, setForgotSent] = useState(false)
 
+  const [currentOperator, setCurrentOperator] = useState<Operator | null>(null)
   const [retreats, setRetreats] = useState<Retreat[]>([])
-  const [operators, setOperators] = useState<Operator[]>([])
   const [selectedRetreatId, setSelectedRetreatId] = useState('')
   const [travelerName, setTravelerName] = useState('')
   const [travelerEmail, setTravelerEmail] = useState('')
@@ -52,16 +56,20 @@ export default function OperatorPortal() {
 
   const [pastBookings, setPastBookings] = useState<BookingReport[]>([])
 
-  const selectedRetreat = retreats.find(r => r.id === selectedRetreatId)
-  const operator = selectedRetreat
-    ? operators.find(o => o.id === selectedRetreat.operator_id)
-    : null
-  const commissionRate = operator?.commission_rate ?? 0
+  // Auto-select retreat if operator only has one
+  useEffect(() => {
+    if (retreats.length === 1 && !selectedRetreatId) {
+      setSelectedRetreatId(retreats[0].id)
+    }
+  }, [retreats, selectedRetreatId])
+
+  const commissionRate = currentOperator?.commission_rate ?? 0
   const commissionOwed = bookingAmount
     ? (parseFloat(bookingAmount) * commissionRate) / 100
     : 0
 
   const fetchData = useCallback(async () => {
+    // RLS auto-scopes these queries to the authenticated operator
     const [retreatRes, operatorRes, bookingsRes] = await Promise.all([
       supabase.from('retreats').select('id, retreat_name, operator_id, location_town').order('retreat_name'),
       supabase.from('retreat_operators').select('id, operator_name, commission_rate'),
@@ -72,49 +80,79 @@ export default function OperatorPortal() {
     ])
 
     if (retreatRes.data) setRetreats(retreatRes.data)
-    if (operatorRes.data) setOperators(operatorRes.data)
+    if (operatorRes.data && operatorRes.data.length > 0) {
+      setCurrentOperator(operatorRes.data[0]) // RLS returns only their own row
+    }
     if (bookingsRes.data) setPastBookings(bookingsRes.data as unknown as BookingReport[])
     setLoading(false)
   }, [])
 
   useEffect(() => {
-    const isAuth = sessionStorage.getItem('nomara_operator_auth') === 'true'
-    if (isAuth) {
-      setAuthenticated(true)
-      fetchData()
-    } else {
-      setLoading(false)
-    }
+    // Check for existing Supabase Auth session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setAuthenticated(true)
+        fetchData()
+      } else {
+        setLoading(false)
+      }
+    })
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setAuthenticated(true)
+        fetchData()
+      } else if (event === 'SIGNED_OUT') {
+        setAuthenticated(false)
+        setCurrentOperator(null)
+        setRetreats([])
+        setPastBookings([])
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [fetchData])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setAuthError('')
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, role: 'operator' }),
-    })
-    if (res.ok) {
-      sessionStorage.setItem('nomara_operator_auth', 'true')
-      setAuthenticated(true)
-      fetchData()
-    } else {
-      setAuthError('Incorrect password. Please try again.')
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      setAuthError('Invalid email or password. Please try again.')
+      return
     }
+
+    // Auth state listener will handle the rest
+  }
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!forgotEmail) return
+
+    await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: `${window.location.origin}/operator/set-password`,
+    })
+
+    setForgotSent(true)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setAuthenticated(false)
+    setCurrentOperator(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedRetreatId || !travelerName || !travelDates || !durationDays || !bookingAmount) return
+    if (!selectedRetreatId || !travelerName || !travelDates || !durationDays || !bookingAmount || !currentOperator) return
 
     setSubmitting(true)
 
-    const retreat = retreats.find(r => r.id === selectedRetreatId)!
-    const op = operators.find(o => o.id === retreat.operator_id)
-
     const { error: reportError } = await supabase.from('operator_booking_reports').insert({
-      operator_id: retreat.operator_id,
+      operator_id: currentOperator.id,
       retreat_id: selectedRetreatId,
       traveler_name: travelerName,
       traveler_email: travelerEmail || null,
@@ -131,6 +169,7 @@ export default function OperatorPortal() {
       return
     }
 
+    // Also insert into lead_retreat_matches (this table has no RLS, uses anon)
     await supabase.from('lead_retreat_matches').insert({
       lead_name: travelerName,
       lead_email: travelerEmail || null,
@@ -139,8 +178,8 @@ export default function OperatorPortal() {
       trip_price: parseFloat(bookingAmount),
       commission_rate: commissionRate,
       utm_source: 'partner_portal',
-      utm_campaign: op?.operator_name || 'operator_report',
-      referral_partner: op?.operator_name || null,
+      utm_campaign: currentOperator.operator_name || 'operator_report',
+      referral_partner: currentOperator.operator_name || null,
     })
 
     setSelectedRetreatId('')
@@ -173,22 +212,81 @@ export default function OperatorPortal() {
           <div className="w-[50px] h-[1px] bg-n-gold mx-auto mt-1 mb-4" />
           <p className="eyebrow tracking-[0.15em]">Partner Portal</p>
         </div>
-        <form onSubmit={handleLogin} className="w-full max-w-sm">
-          <input
-            type="password"
-            placeholder="Enter partner password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            className="mb-3"
-          />
-          {authError && <p className="text-red-400 text-sm mb-3">{authError}</p>}
-          <button
-            type="submit"
-            className="w-full bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium py-3.5 rounded-nomara transition-colors"
-          >
-            Enter Portal
-          </button>
-        </form>
+
+        {showForgotPassword ? (
+          <div className="w-full max-w-sm">
+            {forgotSent ? (
+              <div className="bg-n-surface border border-n-gold/30 rounded-nomara p-5 text-center">
+                <span className="text-n-gold text-xl block mb-2">✦</span>
+                <p className="text-n-cream mb-1">Reset link sent!</p>
+                <p className="text-n-cream-muted text-sm mb-4">Check your email for a password reset link.</p>
+                <button
+                  onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail('') }}
+                  className="text-n-gold hover:underline text-sm"
+                >
+                  ← Back to login
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-3">
+                <p className="text-n-cream text-sm text-center mb-2">
+                  Enter your email and we&apos;ll send a password reset link.
+                </p>
+                <input
+                  type="email"
+                  placeholder="Your email address"
+                  value={forgotEmail}
+                  onChange={e => setForgotEmail(e.target.value)}
+                  required
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium py-3.5 rounded-nomara transition-colors"
+                >
+                  Send Reset Link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="w-full text-n-cream-muted hover:text-n-cream text-sm transition-colors py-2"
+                >
+                  ← Back to login
+                </button>
+              </form>
+            )}
+          </div>
+        ) : (
+          <form onSubmit={handleLogin} className="w-full max-w-sm space-y-3">
+            <input
+              type="email"
+              placeholder="Email address"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+            {authError && <p className="text-red-400 text-sm">{authError}</p>}
+            <button
+              type="submit"
+              className="w-full bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium py-3.5 rounded-nomara transition-colors"
+            >
+              Enter Portal
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="w-full text-n-cream-muted hover:text-n-cream text-sm transition-colors py-1"
+            >
+              Forgot password?
+            </button>
+          </form>
+        )}
       </div>
     )
   }
@@ -203,15 +301,19 @@ export default function OperatorPortal() {
             <Image src={LOGO_URL} alt="Nomara" width={110} height={40} />
             <span className="eyebrow text-[10px] tracking-[0.15em] mt-0.5">Partner Portal</span>
           </div>
-          <button
-            onClick={() => {
-              sessionStorage.removeItem('nomara_operator_auth')
-              setAuthenticated(false)
-            }}
-            className="text-n-cream-muted hover:text-n-cream text-sm transition-colors"
-          >
-            Log out
-          </button>
+          <div className="flex items-center gap-4">
+            {currentOperator && (
+              <span className="text-n-cream-muted text-sm hidden sm:inline">
+                {currentOperator.operator_name}
+              </span>
+            )}
+            <button
+              onClick={handleLogout}
+              className="text-n-cream-muted hover:text-n-cream text-sm transition-colors"
+            >
+              Log out
+            </button>
+          </div>
         </div>
       </header>
 
@@ -243,18 +345,24 @@ export default function OperatorPortal() {
               <label className="eyebrow block mb-2">
                 Your Retreat <span className="text-red-400">*</span>
               </label>
-              <select
-                value={selectedRetreatId}
-                onChange={e => setSelectedRetreatId(e.target.value)}
-                required
-              >
-                <option value="">Select a retreat...</option>
-                {retreats.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.retreat_name}{r.location_town ? ` — ${r.location_town}` : ''}
-                  </option>
-                ))}
-              </select>
+              {retreats.length === 1 ? (
+                <div className="bg-n-bg border border-n-border rounded-lg p-3 text-n-cream">
+                  {retreats[0].retreat_name}{retreats[0].location_town ? ` — ${retreats[0].location_town}` : ''}
+                </div>
+              ) : (
+                <select
+                  value={selectedRetreatId}
+                  onChange={e => setSelectedRetreatId(e.target.value)}
+                  required
+                >
+                  <option value="">Select a retreat...</option>
+                  {retreats.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.retreat_name}{r.location_town ? ` — ${r.location_town}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* Traveler name */}
@@ -332,7 +440,7 @@ export default function OperatorPortal() {
             </div>
 
             {/* Commission info card */}
-            {selectedRetreatId && (
+            {(selectedRetreatId || retreats.length === 1) && (
               <div className="bg-n-bg border border-n-gold/30 rounded-nomara p-5">
                 <div className="flex justify-between items-center mb-2">
                   <span className="eyebrow text-[10px]">Commission Rate</span>

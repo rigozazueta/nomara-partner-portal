@@ -12,6 +12,8 @@ const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/pub
 interface Operator {
   id: string
   operator_name: string
+  email: string | null
+  auth_user_id: string | null
 }
 
 interface Retreat {
@@ -120,6 +122,10 @@ export default function AdminDashboard() {
   const [expandedLinkId, setExpandedLinkId] = useState<string | null>(null)
   const [expandedClicks, setExpandedClicks] = useState<ReferralClick[]>([])
 
+  // Operator invite state
+  const [invitingOperatorId, setInvitingOperatorId] = useState<string | null>(null)
+  const [inviteMessage, setInviteMessage] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null)
+
   // ─── Data fetching ─────────────────────────────────
 
   const fetchData = useCallback(async () => {
@@ -128,7 +134,7 @@ export default function AdminDashboard() {
         .from('operator_booking_reports')
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
         .order('submitted_at', { ascending: false }),
-      supabase.from('retreat_operators').select('id, operator_name').order('operator_name'),
+      supabase.from('retreat_operators').select('id, operator_name, email, auth_user_id').order('operator_name'),
       supabase.from('retreats').select('id, retreat_name, operator_id, location_town, bookretreats_url').order('retreat_name'),
       supabase
         .from('referral_links')
@@ -175,6 +181,7 @@ export default function AdminDashboard() {
     })
     if (res.ok) {
       sessionStorage.setItem('nomara_admin_auth', 'true')
+      sessionStorage.setItem('nomara_admin_pw', password)
       setAuthenticated(true)
       fetchData()
     } else {
@@ -301,6 +308,32 @@ export default function AdminDashboard() {
     navigator.clipboard.writeText(`${baseUrl}/go/${slug}`)
     setCopiedSlug(slug)
     setTimeout(() => setCopiedSlug(null), 2000)
+  }
+
+  // ─── Operator invite ──────────────────────────────
+
+  const inviteOperator = async (operatorId: string) => {
+    setInvitingOperatorId(operatorId)
+    setInviteMessage(null)
+    try {
+      const adminPw = sessionStorage.getItem('nomara_admin_pw') || password
+      const res = await fetch('/api/invite-operator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operator_id: operatorId, admin_password: adminPw }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setInviteMessage({ id: operatorId, text: data.message, type: 'success' })
+        fetchData()
+      } else {
+        setInviteMessage({ id: operatorId, text: data.error, type: 'error' })
+      }
+    } catch {
+      setInviteMessage({ id: operatorId, text: 'Network error', type: 'error' })
+    }
+    setInvitingOperatorId(null)
+    setTimeout(() => setInviteMessage(null), 5000)
   }
 
   // ─── Computed data ─────────────────────────────────
@@ -966,6 +999,80 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
+        </section>
+        {/* ═══ Operator Portal Access ═══ */}
+        <section>
+          <p className="eyebrow mb-3">✦ Partner Portal Access</p>
+          <h3 className="font-serif-italic text-n-cream text-2xl mb-5">Operator Accounts</h3>
+
+          <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
+                <thead>
+                  <tr className="border-b border-n-border">
+                    <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Operator</th>
+                    <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Email</th>
+                    <th className="eyebrow text-[10px] text-center py-3 px-3 font-medium">Status</th>
+                    <th className="eyebrow text-[10px] text-right py-3 px-5 font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {operators.map(op => {
+                    const status = op.auth_user_id ? 'active' : op.email ? 'not_invited' : 'no_email'
+                    return (
+                      <tr key={op.id} className="border-b border-n-border/50 last:border-0">
+                        <td className="py-3.5 px-5 text-n-cream font-medium">{op.operator_name}</td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">{op.email || '—'}</td>
+                        <td className="py-3.5 px-3 text-center">
+                          {status === 'active' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
+                              Active
+                            </span>
+                          )}
+                          {status === 'not_invited' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-cream/20 text-n-cream-muted">
+                              Not Invited
+                            </span>
+                          )}
+                          {status === 'no_email' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-red-400/30 text-red-400/80">
+                              No Email
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-5 text-right">
+                          {inviteMessage?.id === op.id && (
+                            <span className={`text-xs mr-2 ${inviteMessage.type === 'success' ? 'text-n-gold' : 'text-red-400'}`}>
+                              {inviteMessage.text}
+                            </span>
+                          )}
+                          {status === 'no_email' ? (
+                            <span className="text-n-cream-muted text-xs">Add email first</span>
+                          ) : status === 'active' ? (
+                            <button
+                              onClick={() => inviteOperator(op.id)}
+                              disabled={invitingOperatorId === op.id}
+                              className="px-3 py-1.5 border border-n-cream/20 text-n-cream-muted text-xs rounded-lg hover:bg-n-bg transition-colors whitespace-nowrap disabled:opacity-50"
+                            >
+                              {invitingOperatorId === op.id ? 'Sending...' : 'Re-invite'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => inviteOperator(op.id)}
+                              disabled={invitingOperatorId === op.id}
+                              className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium disabled:opacity-50"
+                            >
+                              {invitingOperatorId === op.id ? 'Sending...' : 'Send Invite'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
       </main>
     </div>
