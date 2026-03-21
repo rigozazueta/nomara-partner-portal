@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400;1,500&family=Inter:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nomara-bg: #0a1a0f;
+  --nomara-surface: #0f2a18;
+  --nomara-gold: #C9A84C;
+  --nomara-cream: #f5f0e8;
+  --nomara-cream-muted: rgba(245, 240, 232, 0.6);
+  --nomara-border: rgba(201, 168, 76, 0.25);
+}
+
+html {
+  background-color: var(--nomara-bg);
+}
+
+body {
+  color: var(--nomara-cream);
+  background-color: var(--nomara-bg);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-weight: 300;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Utility classes */
+.font-serif-italic {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.eyebrow {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--nomara-gold);
+}
+
+/* Form input styling */
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="password"],
+input[type="date"],
+textarea,
+select {
+  background-color: var(--nomara-surface);
+  color: var(--nomara-cream);
+  border: 1px solid var(--nomara-border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  font-weight: 300;
+  width: 100%;
+  transition: border-color 0.2s;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--nomara-cream-muted);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--nomara-gold);
+}
+
+select option {
+  background-color: var(--nomara-surface);
+  color: var(--nomara-cream);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--nomara-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 168, 76, 0.3);
+  border-radius: 3px;
+}
