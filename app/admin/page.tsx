@@ -82,6 +82,17 @@ interface ReferralClick {
   country: string | null
 }
 
+interface PartnerApplication {
+  id: string
+  contact_name: string
+  business_name: string
+  email: string
+  location: string | null
+  message: string | null
+  status: string
+  created_at: string
+}
+
 // ─── Component ───────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -122,6 +133,9 @@ export default function AdminDashboard() {
   const [expandedLinkId, setExpandedLinkId] = useState<string | null>(null)
   const [expandedClicks, setExpandedClicks] = useState<ReferralClick[]>([])
 
+  // Partner applications state
+  const [applications, setApplications] = useState<PartnerApplication[]>([])
+
   // Operator invite state
   const [invitingOperatorId, setInvitingOperatorId] = useState<string | null>(null)
   const [inviteMessage, setInviteMessage] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null)
@@ -129,7 +143,7 @@ export default function AdminDashboard() {
   // ─── Data fetching ─────────────────────────────────
 
   const fetchData = useCallback(async () => {
-    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes] = await Promise.all([
+    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes] = await Promise.all([
       supabase
         .from('operator_booking_reports')
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
@@ -141,6 +155,7 @@ export default function AdminDashboard() {
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
         .order('created_at', { ascending: false }),
       supabase.from('referral_clicks').select('id', { count: 'exact', head: true }),
+      supabase.from('partner_applications').select('*').order('created_at', { ascending: false }),
     ])
 
     if (bookingsRes.data) setBookings(bookingsRes.data as unknown as BookingReport[])
@@ -156,6 +171,7 @@ export default function AdminDashboard() {
       setTrackedEmails(emails)
     }
     setTotalClicks(clickCountRes.count ?? 0)
+    if (appsRes.data) setApplications(appsRes.data as PartnerApplication[])
     setLoading(false)
   }, [])
 
@@ -1000,6 +1016,118 @@ export default function AdminDashboard() {
             </div>
           )}
         </section>
+        {/* ═══ Partner Applications ═══ */}
+        <section>
+          <p className="eyebrow mb-3">✦ Partner Applications</p>
+          <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+            Incoming ({applications.filter(a => a.status === 'pending').length} pending)
+          </h3>
+
+          {applications.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-6">
+              <p className="text-n-cream-muted text-sm">No applications yet.</p>
+            </div>
+          ) : (
+            <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-n-border">
+                      <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Contact</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Business</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Email</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Location</th>
+                      <th className="eyebrow text-[10px] text-center py-3 px-3 font-medium">Status</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Submitted</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-5 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {applications.map(app => (
+                      <tr key={app.id} className="border-b border-n-border/50 last:border-0">
+                        <td className="py-3.5 px-5 text-n-cream font-medium">{app.contact_name}</td>
+                        <td className="py-3.5 px-3 text-n-cream">{app.business_name}</td>
+                        <td className="py-3.5 px-3">
+                          <a href={`mailto:${app.email}`} className="text-n-gold hover:underline text-sm">{app.email}</a>
+                        </td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">{app.location || '—'}</td>
+                        <td className="py-3.5 px-3 text-center">
+                          {app.status === 'pending' ? (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-gold/40 text-n-gold">
+                              Pending
+                            </span>
+                          ) : app.status === 'approved' ? (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
+                              Approved
+                            </span>
+                          ) : app.status === 'reviewed' ? (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-cream/20 text-n-cream-muted">
+                              Reviewed
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-red-400/30 text-red-400/80">
+                              Declined
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">
+                          {new Date(app.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="py-3.5 px-5 text-right">
+                          {app.status === 'pending' && (
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                onClick={async () => {
+                                  await supabase.from('partner_applications').update({ status: 'approved' }).eq('id', app.id)
+                                  fetchData()
+                                }}
+                                className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  await supabase.from('partner_applications').update({ status: 'declined' }).eq('id', app.id)
+                                  fetchData()
+                                }}
+                                className="px-3 py-1.5 border border-n-cream/20 text-n-cream-muted text-xs rounded-lg hover:bg-n-bg transition-colors whitespace-nowrap"
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          )}
+                          {app.status !== 'pending' && (
+                            <button
+                              onClick={async () => {
+                                await supabase.from('partner_applications').update({ status: 'pending' }).eq('id', app.id)
+                                fetchData()
+                              }}
+                              className="px-3 py-1.5 border border-n-cream/20 text-n-cream-muted text-xs rounded-lg hover:bg-n-bg transition-colors whitespace-nowrap"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {applications.some(a => a.message) && (
+                <div className="border-t border-n-border p-5">
+                  <p className="eyebrow text-[10px] mb-3">Messages</p>
+                  {applications.filter(a => a.message).map(a => (
+                    <div key={a.id} className="mb-3 last:mb-0">
+                      <span className="text-n-cream text-sm font-medium">{a.contact_name}:</span>
+                      <span className="text-n-cream-muted text-sm ml-2">{a.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
         {/* ═══ Operator Portal Access ═══ */}
         <section>
           <p className="eyebrow mb-3">✦ Partner Portal Access</p>
