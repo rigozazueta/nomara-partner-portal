@@ -135,6 +135,8 @@ export default function AdminDashboard() {
 
   // Partner applications state
   const [applications, setApplications] = useState<PartnerApplication[]>([])
+  const [approvingAppId, setApprovingAppId] = useState<string | null>(null)
+  const [approveMessage, setApproveMessage] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null)
 
   // Operator invite state
   const [invitingOperatorId, setInvitingOperatorId] = useState<string | null>(null)
@@ -324,6 +326,32 @@ export default function AdminDashboard() {
     navigator.clipboard.writeText(`${baseUrl}/go/${slug}`)
     setCopiedSlug(slug)
     setTimeout(() => setCopiedSlug(null), 2000)
+  }
+
+  // ─── Approve application ──────────────────────────
+
+  const approveApplication = async (appId: string) => {
+    setApprovingAppId(appId)
+    setApproveMessage(null)
+    try {
+      const adminPw = sessionStorage.getItem('nomara_admin_pw') || password
+      const res = await fetch('/api/approve-application', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ application_id: appId, admin_password: adminPw }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setApproveMessage({ id: appId, text: data.message, type: 'success' })
+        fetchData()
+      } else {
+        setApproveMessage({ id: appId, text: data.error, type: 'error' })
+      }
+    } catch {
+      setApproveMessage({ id: appId, text: 'Network error', type: 'error' })
+    }
+    setApprovingAppId(null)
+    setTimeout(() => setApproveMessage(null), 6000)
   }
 
   // ─── Operator invite ──────────────────────────────
@@ -1074,16 +1102,19 @@ export default function AdminDashboard() {
                           {new Date(app.created_at).toLocaleDateString()}
                         </td>
                         <td className="py-3.5 px-5 text-right">
+                          {approveMessage?.id === app.id && (
+                            <span className={`text-xs mr-2 ${approveMessage.type === 'success' ? 'text-n-gold' : 'text-red-400'}`}>
+                              {approveMessage.text}
+                            </span>
+                          )}
                           {app.status === 'pending' && (
                             <div className="flex gap-2 justify-end">
                               <button
-                                onClick={async () => {
-                                  await supabase.from('partner_applications').update({ status: 'approved' }).eq('id', app.id)
-                                  fetchData()
-                                }}
-                                className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium"
+                                onClick={() => approveApplication(app.id)}
+                                disabled={approvingAppId === app.id}
+                                className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium disabled:opacity-50"
                               >
-                                Approve
+                                {approvingAppId === app.id ? 'Approving...' : 'Approve & Invite'}
                               </button>
                               <button
                                 onClick={async () => {
