@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { formatCurrency } from '@/lib/utils'
 import WaitlistForm from './WaitlistForm'
+import HeroCarousel from './HeroCarousel'
 
 const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(3).png'
 
@@ -16,6 +17,8 @@ interface Retreat {
   location_town: string | null
   location_region: string | null
   location_country: string | null
+  full_address: string | null
+  location_description: string | null
   price_from: number | null
   duration_days: number | null
   hero_image_url: string | null
@@ -29,6 +32,15 @@ interface Retreat {
   rating: number | null
   review_count: number | null
   retreat_operators: { operator_name: string } | null
+}
+
+interface Review {
+  id: string
+  reviewer_name: string
+  rating: number
+  review_text: string
+  travel_date: string | null
+  created_at: string
 }
 
 export default async function RetreatDetail({ params }: { params: { slug: string } }) {
@@ -45,6 +57,31 @@ export default async function RetreatDetail({ params }: { params: { slug: string
 
   const r = retreat as unknown as Retreat
   const location = [r.location_town, r.location_region, r.location_country].filter(Boolean).join(', ')
+
+  // Build gallery array: hero first, then gallery_urls
+  const allImages = [
+    ...(r.hero_image_url ? [r.hero_image_url] : []),
+    ...(r.gallery_urls || []),
+  ]
+
+  // Fetch approved reviews
+  const { data: reviewsData } = await supabaseAdmin
+    .from('retreat_reviews')
+    .select('id, reviewer_name, rating, review_text, travel_date, created_at')
+    .eq('retreat_id', r.id)
+    .eq('approved', true)
+    .order('created_at', { ascending: false })
+
+  const reviews = (reviewsData || []) as Review[]
+  const avgRating = reviews.length > 0
+    ? reviews.reduce((sum, rev) => sum + rev.rating, 0) / reviews.length
+    : null
+
+  // Google Maps embed URL
+  const mapQuery = r.full_address || location
+  const mapEmbedUrl = mapQuery
+    ? `https://www.google.com/maps?q=${encodeURIComponent(mapQuery)}&output=embed`
+    : null
 
   return (
     <div className="min-h-screen">
@@ -63,22 +100,8 @@ export default async function RetreatDetail({ params }: { params: { slug: string
         </div>
       </header>
 
-      {/* Hero */}
-      <div className="relative w-full aspect-[16/9] md:aspect-[21/9] max-h-[560px] bg-n-surface overflow-hidden">
-        {r.hero_image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={r.hero_image_url}
-            alt={r.retreat_name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <span className="text-n-gold text-6xl">✦</span>
-          </div>
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-n-bg via-n-bg/30 to-transparent" />
-      </div>
+      {/* Hero Carousel */}
+      <HeroCarousel images={allImages} alt={r.retreat_name} />
 
       <main className="max-w-6xl mx-auto px-4 md:px-8 -mt-20 md:-mt-28 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
@@ -113,9 +136,10 @@ export default async function RetreatDetail({ params }: { params: { slug: string
                     <span className="text-n-gold mr-2">✦</span>{r.duration_days} days
                   </span>
                 )}
-                {r.rating && r.review_count ? (
+                {avgRating !== null ? (
                   <span className="text-n-cream-muted">
-                    <span className="text-n-gold mr-2">★</span>{r.rating} ({r.review_count} reviews)
+                    <span className="text-n-gold mr-2">★</span>
+                    {avgRating.toFixed(1)} ({reviews.length} {reviews.length === 1 ? 'review' : 'reviews'})
                   </span>
                 ) : null}
               </div>
@@ -168,6 +192,78 @@ export default async function RetreatDetail({ params }: { params: { slug: string
                       </li>
                     ))}
                   </ul>
+                </div>
+              </section>
+            )}
+
+            {/* Location */}
+            {(mapEmbedUrl || r.location_description) && (
+              <section className="mb-10">
+                <p className="eyebrow mb-3">✦ Location</p>
+                <h2 className="font-serif-italic text-n-cream text-2xl md:text-3xl mb-5">
+                  Where You&apos;ll Stay
+                </h2>
+                {r.location_description && (
+                  <p className="text-n-cream-muted text-[16px] leading-relaxed mb-5 whitespace-pre-line">
+                    {r.location_description}
+                  </p>
+                )}
+                {r.full_address && (
+                  <p className="text-n-cream text-sm mb-4">
+                    <span className="text-n-gold mr-2">📍</span>{r.full_address}
+                  </p>
+                )}
+                {mapEmbedUrl && (
+                  <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+                    <iframe
+                      src={mapEmbedUrl}
+                      width="100%"
+                      height="360"
+                      style={{ border: 0, filter: 'invert(0.85) hue-rotate(180deg) saturate(0.6)' }}
+                      allowFullScreen
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                      title={`Map of ${r.retreat_name}`}
+                    />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Reviews */}
+            {reviews.length > 0 && (
+              <section className="mb-10">
+                <p className="eyebrow mb-3">✦ Traveler Reviews</p>
+                <div className="flex items-baseline gap-4 mb-5">
+                  <h2 className="font-serif-italic text-n-cream text-2xl md:text-3xl">
+                    What Guests Say
+                  </h2>
+                  {avgRating !== null && (
+                    <span className="text-n-gold">
+                      ★ {avgRating.toFixed(1)} <span className="text-n-cream-muted text-sm">({reviews.length})</span>
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  {reviews.map(rev => (
+                    <div key={rev.id} className="bg-n-surface border border-n-border rounded-nomara p-6">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <p className="text-n-cream font-medium">{rev.reviewer_name}</p>
+                          {rev.travel_date && (
+                            <p className="text-n-cream-muted text-xs">Visited {rev.travel_date}</p>
+                          )}
+                        </div>
+                        <div className="text-n-gold text-sm whitespace-nowrap">
+                          {'★'.repeat(rev.rating)}
+                          <span className="text-n-cream-muted/40">{'★'.repeat(5 - rev.rating)}</span>
+                        </div>
+                      </div>
+                      <p className="text-n-cream-muted text-[15px] leading-relaxed whitespace-pre-line">
+                        {rev.review_text}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </section>
             )}

@@ -99,15 +99,32 @@ interface RetreatListing {
   retreat_name: string
   operator_id: string
   hero_image_url: string | null
+  gallery_urls: string[] | null
   tagline: string | null
   about_trip: string | null
   results_list: string[] | null
   inclusions: string[] | null
   important_info: string | null
+  full_address: string | null
+  location_description: string | null
   listing_status: string
   listing_submitted_at: string | null
   listing_published_at: string | null
   retreat_operators: { operator_name: string } | null
+}
+
+interface RetreatReview {
+  id: string
+  retreat_id: string
+  reviewer_name: string
+  reviewer_email: string | null
+  rating: number
+  review_text: string
+  travel_date: string | null
+  approved: boolean
+  source: string
+  created_at: string
+  retreats: { retreat_name: string } | null
 }
 
 interface RetreatWaitlist {
@@ -178,13 +195,27 @@ export default function AdminDashboard() {
   const [editingListingId, setEditingListingId] = useState<string | null>(null)
   const [listingForm, setListingForm] = useState({
     hero_image_url: '',
+    gallery_urls: '',
     tagline: '',
     about_trip: '',
     results_list: '',
     inclusions: '',
     important_info: '',
+    full_address: '',
+    location_description: '',
   })
   const [listingSubmitting, setListingSubmitting] = useState(false)
+
+  // Reviews state
+  const [reviews, setReviews] = useState<RetreatReview[]>([])
+  const [newReview, setNewReview] = useState({
+    retreat_id: '',
+    reviewer_name: '',
+    rating: 5,
+    review_text: '',
+    travel_date: '',
+  })
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
 
   // Waitlist state
   const [waitlists, setWaitlists] = useState<RetreatWaitlist[]>([])
@@ -196,7 +227,7 @@ export default function AdminDashboard() {
   // ─── Data fetching ─────────────────────────────────
 
   const fetchData = useCallback(async () => {
-    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes, listingsRes, waitlistsRes] = await Promise.all([
+    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes, listingsRes, waitlistsRes, reviewsRes] = await Promise.all([
       supabase
         .from('operator_booking_reports')
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
@@ -211,10 +242,14 @@ export default function AdminDashboard() {
       supabase.from('partner_applications').select('*').order('created_at', { ascending: false }),
       supabase
         .from('retreats')
-        .select('id, slug, retreat_name, operator_id, hero_image_url, tagline, about_trip, results_list, inclusions, important_info, listing_status, listing_submitted_at, listing_published_at, retreat_operators(operator_name)')
+        .select('id, slug, retreat_name, operator_id, hero_image_url, gallery_urls, tagline, about_trip, results_list, inclusions, important_info, full_address, location_description, listing_status, listing_submitted_at, listing_published_at, retreat_operators(operator_name)')
         .order('listing_submitted_at', { ascending: false, nullsFirst: false }),
       supabase
         .from('retreat_waitlists')
+        .select('*, retreats(retreat_name)')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('retreat_reviews')
         .select('*, retreats(retreat_name)')
         .order('created_at', { ascending: false }),
     ])
@@ -235,6 +270,7 @@ export default function AdminDashboard() {
     if (appsRes.data) setApplications(appsRes.data as PartnerApplication[])
     if (listingsRes.data) setRetreatListings(listingsRes.data as unknown as RetreatListing[])
     if (waitlistsRes.data) setWaitlists(waitlistsRes.data as unknown as RetreatWaitlist[])
+    if (reviewsRes.data) setReviews(reviewsRes.data as unknown as RetreatReview[])
     setLoading(false)
   }, [])
 
@@ -434,11 +470,14 @@ export default function AdminDashboard() {
     setEditingListingId(listing.id)
     setListingForm({
       hero_image_url: listing.hero_image_url || '',
+      gallery_urls: listing.gallery_urls?.join('\n') || '',
       tagline: listing.tagline || '',
       about_trip: listing.about_trip || '',
       results_list: listing.results_list?.join('\n') || '',
       inclusions: listing.inclusions?.join('\n') || '',
       important_info: listing.important_info || '',
+      full_address: listing.full_address || '',
+      location_description: listing.location_description || '',
     })
   }
 
@@ -448,6 +487,9 @@ export default function AdminDashboard() {
       const headers = await getAuthHeaders()
       const updates = action === 'save_draft' || action === 'publish' ? {
         hero_image_url: listingForm.hero_image_url || null,
+        gallery_urls: listingForm.gallery_urls
+          ? listingForm.gallery_urls.split('\n').map(s => s.trim()).filter(Boolean)
+          : null,
         tagline: listingForm.tagline || null,
         about_trip: listingForm.about_trip || null,
         results_list: listingForm.results_list
@@ -457,6 +499,8 @@ export default function AdminDashboard() {
           ? listingForm.inclusions.split('\n').map(s => s.trim()).filter(Boolean)
           : null,
         important_info: listingForm.important_info || null,
+        full_address: listingForm.full_address || null,
+        location_description: listingForm.location_description || null,
       } : {}
 
       const res = await fetch('/api/publish-retreat', {
@@ -479,6 +523,35 @@ export default function AdminDashboard() {
 
   const updateWaitlistStatus = async (id: string, status: string) => {
     await supabase.from('retreat_waitlists').update({ status }).eq('id', id)
+    fetchData()
+  }
+
+  // ─── Reviews ──────────────────────────────────────
+
+  const submitReview = async () => {
+    if (!newReview.retreat_id || !newReview.reviewer_name || !newReview.review_text) return
+    setReviewSubmitting(true)
+    await supabase.from('retreat_reviews').insert({
+      retreat_id: newReview.retreat_id,
+      reviewer_name: newReview.reviewer_name,
+      rating: newReview.rating,
+      review_text: newReview.review_text,
+      travel_date: newReview.travel_date || null,
+      approved: true,
+      source: 'manual',
+    })
+    setNewReview({ retreat_id: '', reviewer_name: '', rating: 5, review_text: '', travel_date: '' })
+    setReviewSubmitting(false)
+    fetchData()
+  }
+
+  const toggleReviewApproved = async (id: string, approved: boolean) => {
+    await supabase.from('retreat_reviews').update({ approved }).eq('id', id)
+    fetchData()
+  }
+
+  const deleteReview = async (id: string) => {
+    await supabase.from('retreat_reviews').delete().eq('id', id)
     fetchData()
   }
 
@@ -1451,6 +1524,16 @@ export default function AdminDashboard() {
                           />
                         </div>
                         <div>
+                          <label className="eyebrow block mb-2">Additional Photos (one URL per line)</label>
+                          <textarea
+                            value={listingForm.gallery_urls}
+                            onChange={e => setListingForm({ ...listingForm, gallery_urls: e.target.value })}
+                            rows={4}
+                            className="resize-none"
+                            placeholder="https://...photo2.jpg&#10;https://...photo3.jpg"
+                          />
+                        </div>
+                        <div>
                           <label className="eyebrow block mb-2">Tagline</label>
                           <input
                             type="text"
@@ -1482,6 +1565,24 @@ export default function AdminDashboard() {
                             value={listingForm.inclusions}
                             onChange={e => setListingForm({ ...listingForm, inclusions: e.target.value })}
                             rows={4}
+                            className="resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">Full Address</label>
+                          <input
+                            type="text"
+                            value={listingForm.full_address}
+                            onChange={e => setListingForm({ ...listingForm, full_address: e.target.value })}
+                            placeholder="e.g. Playa Guiones, Nosara, Costa Rica"
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">About the Location</label>
+                          <textarea
+                            value={listingForm.location_description}
+                            onChange={e => setListingForm({ ...listingForm, location_description: e.target.value })}
+                            rows={3}
                             className="resize-none"
                           />
                         </div>
@@ -1531,6 +1632,141 @@ export default function AdminDashboard() {
                   </div>
                 )
               })}
+            </div>
+          )}
+        </section>
+
+        {/* ═══ Retreat Reviews ═══ */}
+        <section>
+          <p className="eyebrow mb-3">✦ Retreat Reviews</p>
+          <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+            Traveler Reviews ({reviews.filter(r => !r.approved).length} pending)
+          </h3>
+
+          {/* Add new review form */}
+          <div className="bg-n-surface border border-n-border rounded-nomara p-5 md:p-6 mb-5">
+            <p className="eyebrow text-[10px] mb-4">✦ Add Review</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="eyebrow block mb-2">Retreat</label>
+                <select
+                  value={newReview.retreat_id}
+                  onChange={e => setNewReview({ ...newReview, retreat_id: e.target.value })}
+                >
+                  <option value="">Select retreat...</option>
+                  {retreatListings.map(l => (
+                    <option key={l.id} value={l.id}>{l.retreat_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="eyebrow block mb-2">Reviewer Name</label>
+                <input
+                  type="text"
+                  value={newReview.reviewer_name}
+                  onChange={e => setNewReview({ ...newReview, reviewer_name: e.target.value })}
+                  placeholder="e.g. Sarah J."
+                />
+              </div>
+              <div>
+                <label className="eyebrow block mb-2">Rating</label>
+                <select
+                  value={newReview.rating}
+                  onChange={e => setNewReview({ ...newReview, rating: parseInt(e.target.value) })}
+                >
+                  <option value="5">★★★★★ (5)</option>
+                  <option value="4">★★★★ (4)</option>
+                  <option value="3">★★★ (3)</option>
+                  <option value="2">★★ (2)</option>
+                  <option value="1">★ (1)</option>
+                </select>
+              </div>
+              <div>
+                <label className="eyebrow block mb-2">Travel Date</label>
+                <input
+                  type="text"
+                  value={newReview.travel_date}
+                  onChange={e => setNewReview({ ...newReview, travel_date: e.target.value })}
+                  placeholder="e.g. March 2026"
+                />
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="eyebrow block mb-2">Review Text</label>
+              <textarea
+                value={newReview.review_text}
+                onChange={e => setNewReview({ ...newReview, review_text: e.target.value })}
+                rows={4}
+                placeholder="What did they say about the experience?"
+                className="resize-none"
+              />
+            </div>
+            <button
+              onClick={submitReview}
+              disabled={reviewSubmitting || !newReview.retreat_id || !newReview.reviewer_name || !newReview.review_text}
+              className="mt-4 px-5 py-2.5 bg-n-gold hover:bg-[#d4b96a] disabled:opacity-50 text-n-bg font-medium rounded-nomara transition-colors"
+            >
+              {reviewSubmitting ? 'Adding...' : 'Add Review'}
+            </button>
+          </div>
+
+          {/* Reviews list */}
+          {reviews.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-6">
+              <p className="text-n-cream-muted text-sm">No reviews yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {reviews.map(rev => (
+                <div key={rev.id} className="bg-n-surface border border-n-border rounded-nomara p-5">
+                  <div className="flex items-start justify-between mb-3 gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 flex-wrap mb-1">
+                        <span className="text-n-cream font-medium">{rev.reviewer_name}</span>
+                        <span className="text-n-gold text-sm">
+                          {'★'.repeat(rev.rating)}
+                          <span className="text-n-cream-muted/40">{'★'.repeat(5 - rev.rating)}</span>
+                        </span>
+                        {rev.approved ? (
+                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
+                            Published
+                          </span>
+                        ) : (
+                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-gold/40 text-n-gold">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-n-cream-muted text-xs">
+                        {rev.retreats?.retreat_name || '—'}
+                        {rev.travel_date && ` • ${rev.travel_date}`}
+                        {` • ${rev.source}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => toggleReviewApproved(rev.id, !rev.approved)}
+                        className={`px-3 py-1.5 text-xs rounded-lg transition-colors whitespace-nowrap font-medium ${
+                          rev.approved
+                            ? 'border border-n-cream/20 text-n-cream-muted hover:bg-n-bg'
+                            : 'bg-n-gold text-n-bg hover:bg-[#d4b96a]'
+                        }`}
+                      >
+                        {rev.approved ? 'Hide' : 'Approve'}
+                      </button>
+                      <button
+                        onClick={() => deleteReview(rev.id)}
+                        className="px-3 py-1.5 border border-red-400/30 text-red-400/80 text-xs rounded-lg hover:bg-red-400/10 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-n-cream-muted text-sm leading-relaxed whitespace-pre-line">
+                    {rev.review_text}
+                  </p>
+                </div>
+              ))}
             </div>
           )}
         </section>

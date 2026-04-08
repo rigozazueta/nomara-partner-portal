@@ -48,11 +48,14 @@ interface RetreatListing {
   slug: string | null
   retreat_name: string
   hero_image_url: string | null
+  gallery_urls: string[] | null
   tagline: string | null
   about_trip: string | null
   results_list: string[] | null
   inclusions: string[] | null
   important_info: string | null
+  full_address: string | null
+  location_description: string | null
   listing_status: string
   listing_submitted_at: string | null
   listing_published_at: string | null
@@ -89,11 +92,14 @@ export default function OperatorPortal() {
   const [editingListingId, setEditingListingId] = useState<string | null>(null)
   const [listingForm, setListingForm] = useState({
     hero_image_url: '',
+    gallery_urls: '',
     tagline: '',
     about_trip: '',
     results_list: '',
     inclusions: '',
     important_info: '',
+    full_address: '',
+    location_description: '',
   })
   const [listingSubmitting, setListingSubmitting] = useState(false)
   const [listingMessage, setListingMessage] = useState('')
@@ -121,7 +127,7 @@ export default function OperatorPortal() {
         .order('submitted_at', { ascending: false }),
       supabase
         .from('retreats')
-        .select('id, slug, retreat_name, hero_image_url, tagline, about_trip, results_list, inclusions, important_info, listing_status, listing_submitted_at, listing_published_at')
+        .select('id, slug, retreat_name, hero_image_url, gallery_urls, tagline, about_trip, results_list, inclusions, important_info, full_address, location_description, listing_status, listing_submitted_at, listing_published_at')
         .order('retreat_name'),
     ])
 
@@ -206,11 +212,14 @@ export default function OperatorPortal() {
     setEditingListingId(listing.id)
     setListingForm({
       hero_image_url: listing.hero_image_url || '',
+      gallery_urls: listing.gallery_urls?.join('\n') || '',
       tagline: listing.tagline || '',
       about_trip: listing.about_trip || '',
       results_list: listing.results_list?.join('\n') || '',
       inclusions: listing.inclusions?.join('\n') || '',
       important_info: listing.important_info || '',
+      full_address: listing.full_address || '',
+      location_description: listing.location_description || '',
     })
   }
 
@@ -226,6 +235,9 @@ export default function OperatorPortal() {
 
     const patch: Record<string, unknown> = {
       hero_image_url: listingForm.hero_image_url || null,
+      gallery_urls: listingForm.gallery_urls
+        ? listingForm.gallery_urls.split('\n').map(s => s.trim()).filter(Boolean)
+        : null,
       tagline: listingForm.tagline || null,
       about_trip: listingForm.about_trip || null,
       results_list: listingForm.results_list
@@ -235,6 +247,8 @@ export default function OperatorPortal() {
         ? listingForm.inclusions.split('\n').map(s => s.trim()).filter(Boolean)
         : null,
       important_info: listingForm.important_info || null,
+      full_address: listingForm.full_address || null,
+      location_description: listingForm.location_description || null,
     }
 
     if (action === 'submit_for_review') {
@@ -552,7 +566,19 @@ export default function OperatorPortal() {
                             onChange={e => setListingForm({ ...listingForm, hero_image_url: e.target.value })}
                             placeholder="https://..."
                           />
-                          <p className="text-n-cream-muted text-xs mt-1">Paste a direct image URL (Unsplash, your website, etc.)</p>
+                          <p className="text-n-cream-muted text-xs mt-1">Main image that shows first in the carousel.</p>
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">Additional Photos (one URL per line)</label>
+                          <textarea
+                            value={listingForm.gallery_urls}
+                            onChange={e => setListingForm({ ...listingForm, gallery_urls: e.target.value })}
+                            rows={4}
+                            placeholder={'https://...photo2.jpg\nhttps://...photo3.jpg\nhttps://...photo4.jpg'}
+                            className="resize-none"
+                          />
+                          <p className="text-n-cream-muted text-xs mt-1">These will appear after the hero image in the carousel.</p>
                         </div>
 
                         <div>
@@ -594,6 +620,28 @@ export default function OperatorPortal() {
                             onChange={e => setListingForm({ ...listingForm, inclusions: e.target.value })}
                             rows={5}
                             placeholder={'6-night / 7-day villa stay\n3 gourmet meals daily\n5x 90-minute surf sessions\nAirport transfers'}
+                            className="resize-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">Full Address</label>
+                          <input
+                            type="text"
+                            value={listingForm.full_address}
+                            onChange={e => setListingForm({ ...listingForm, full_address: e.target.value })}
+                            placeholder="e.g. Playa Guiones, Nosara, Guanacaste, Costa Rica"
+                          />
+                          <p className="text-n-cream-muted text-xs mt-1">Used to show a map on your public page.</p>
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">About the Location</label>
+                          <textarea
+                            value={listingForm.location_description}
+                            onChange={e => setListingForm({ ...listingForm, location_description: e.target.value })}
+                            rows={3}
+                            placeholder="Describe the area — nearby beaches, vibe of the town, what travelers can explore..."
                             className="resize-none"
                           />
                         </div>
