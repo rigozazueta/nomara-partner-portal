@@ -32,6 +32,17 @@ interface BookingReport {
   retreat_operators: { operator_name: string } | null
 }
 
+interface ReferralLink {
+  id: string
+  slug: string
+  lead_name: string
+  lead_email: string | null
+  total_clicks: number
+  active: boolean
+  created_at: string
+  retreats: { retreat_name: string } | null
+}
+
 export default function OperatorPortal() {
   const [authenticated, setAuthenticated] = useState(false)
   const [email, setEmail] = useState('')
@@ -55,6 +66,8 @@ export default function OperatorPortal() {
   const [submitted, setSubmitted] = useState(false)
 
   const [pastBookings, setPastBookings] = useState<BookingReport[]>([])
+  const [referralLinks, setReferralLinks] = useState<ReferralLink[]>([])
+  const [showBookingForm, setShowBookingForm] = useState(false)
 
   // Auto-select retreat if operator only has one
   useEffect(() => {
@@ -81,7 +94,17 @@ export default function OperatorPortal() {
 
     if (retreatRes.data) setRetreats(retreatRes.data)
     if (operatorRes.data && operatorRes.data.length > 0) {
-      setCurrentOperator(operatorRes.data[0]) // RLS returns only their own row
+      const op = operatorRes.data[0]
+      setCurrentOperator(op)
+
+      // Fetch referral links for this operator
+      const { data: linksData } = await supabase
+        .from('referral_links')
+        .select('id, slug, lead_name, lead_email, total_clicks, active, created_at, retreats(retreat_name)')
+        .eq('operator_id', op.id)
+        .order('created_at', { ascending: false })
+
+      if (linksData) setReferralLinks(linksData as unknown as ReferralLink[])
     }
     if (bookingsRes.data) setPastBookings(bookingsRes.data as unknown as BookingReport[])
     setLoading(false)
@@ -317,28 +340,180 @@ export default function OperatorPortal() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 md:py-14">
+      <main className="max-w-5xl mx-auto px-4 md:px-8 py-10 md:py-14 space-y-12">
         {/* Success message */}
         {submitted && (
-          <div className="mb-8 bg-n-surface border border-n-gold/30 rounded-nomara p-5 text-n-cream">
+          <div className="bg-n-surface border border-n-gold/30 rounded-nomara p-5 text-n-cream">
             <span className="text-n-gold mr-2">✦</span>
             Thanks! We&apos;ll send your commission invoice within 48 hours.
           </div>
         )}
 
-        {/* Title area */}
-        <div className="mb-10">
-          <p className="eyebrow mb-3">✦ Partner Booking Portal</p>
+        {/* ═══ Welcome / Title ═══ */}
+        <div>
+          <p className="eyebrow mb-3">✦ Partner Dashboard</p>
           <h2 className="font-serif-italic text-n-cream text-3xl md:text-[44px] leading-tight mb-3">
-            Report a Nomara Booking
+            Welcome back{currentOperator?.operator_name ? `, ${currentOperator.operator_name}` : ''}
           </h2>
           <p className="text-n-cream-muted text-[16px]">
-            Fill in the details below and we&apos;ll send your commission invoice within 48 hours.
+            Here&apos;s how your Nomara partnership is performing.
           </p>
         </div>
 
-        {/* Booking Form */}
-        <div className="bg-n-surface border border-n-border rounded-nomara p-6 md:p-8 mb-10">
+        {/* ═══ Hero KPI Cards ═══ */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {(() => {
+            const totalClicks = referralLinks.reduce((sum, l) => sum + (l.total_clicks || 0), 0)
+            const totalBookings = pastBookings.length
+            const totalReferred = pastBookings.reduce((sum, b) => sum + Number(b.booking_amount), 0)
+            const totalCommission = pastBookings.reduce((sum, b) => sum + Number(b.commission_owed), 0)
+            return (
+              <>
+                <KPICard label="Link Clicks" value={totalClicks.toString()} />
+                <KPICard label="Bookings Reported" value={totalBookings.toString()} />
+                <KPICard label="Total Referred" value={formatCurrency(totalReferred)} />
+                <KPICard label="Commission Earned" value={formatCurrency(totalCommission)} highlight />
+              </>
+            )
+          })()}
+        </section>
+
+        {/* ═══ Referral Links Section ═══ */}
+        <section>
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <p className="eyebrow mb-3">✦ Referral Links</p>
+              <h3 className="font-serif-italic text-n-cream text-2xl">
+                Travelers Sent Your Way
+              </h3>
+            </div>
+          </div>
+
+          {referralLinks.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-8 text-center">
+              <span className="text-n-gold text-2xl block mb-3">✦</span>
+              <p className="text-n-cream font-medium mb-2">No referrals yet</p>
+              <p className="text-n-cream-muted text-sm max-w-md mx-auto">
+                When Nomara sends a traveler your way, their personalized referral link will appear here — along with real-time click tracking.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="border-b border-n-border">
+                      <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Traveler</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Retreat</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Sent</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Clicks</th>
+                      <th className="eyebrow text-[10px] text-center py-3 px-5 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {referralLinks.map(link => (
+                      <tr key={link.id} className="border-b border-n-border/50 last:border-0">
+                        <td className="py-3.5 px-5 text-n-cream font-medium">{link.lead_name}</td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">{link.retreats?.retreat_name || '—'}</td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">
+                          {new Date(link.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="py-3.5 px-3 text-right text-n-gold font-medium text-base">
+                          {link.total_clicks || 0}
+                        </td>
+                        <td className="py-3.5 px-5 text-center">
+                          {link.active ? (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-cream/20 text-n-cream-muted">
+                              Closed
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ═══ Recent Bookings Section ═══ */}
+        <section>
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <p className="eyebrow mb-3">✦ Your Bookings</p>
+              <h3 className="font-serif-italic text-n-cream text-2xl">
+                Commission History
+              </h3>
+            </div>
+            <button
+              onClick={() => setShowBookingForm(!showBookingForm)}
+              className="px-4 py-2 text-sm bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium rounded-nomara transition-colors whitespace-nowrap"
+            >
+              {showBookingForm ? 'Close Form' : '+ Report a Booking'}
+            </button>
+          </div>
+
+          {pastBookings.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-8 text-center">
+              <p className="text-n-cream-muted text-sm">
+                No bookings reported yet. After a Nomara-referred traveler completes their stay, report it here to receive your commission.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="border-b border-n-border">
+                      <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Traveler</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Dates</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Amount</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Commission</th>
+                      <th className="eyebrow text-[10px] text-center py-3 px-5 font-medium">Paid</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pastBookings.map(b => (
+                      <tr key={b.id} className="border-b border-n-border/50 last:border-0">
+                        <td className="py-3.5 px-5 text-n-cream font-medium">{b.traveler_name}</td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">{b.travel_dates}</td>
+                        <td className="py-3.5 px-3 text-right text-n-cream">{formatCurrency(b.booking_amount)}</td>
+                        <td className="py-3.5 px-3 text-right text-n-gold font-medium">
+                          {formatCurrency(b.commission_owed)}
+                        </td>
+                        <td className="py-3.5 px-5 text-center">
+                          {b.commission_paid ? (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
+                              Paid
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-cream/20 text-n-cream-muted">
+                              Pending
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ═══ Collapsible Booking Form ═══ */}
+        {showBookingForm && (
+        <section>
+          <p className="eyebrow mb-3">✦ Report a New Booking</p>
+          <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+            Submit Booking Details
+          </h3>
+        <div className="bg-n-surface border border-n-border rounded-nomara p-6 md:p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Retreat select */}
             <div>
@@ -477,56 +652,21 @@ export default function OperatorPortal() {
             </button>
           </form>
         </div>
-
-        {/* Past Bookings */}
-        <div>
-          <p className="eyebrow mb-3">✦ Your Booking History</p>
-          <h3 className="font-serif-italic text-n-cream text-2xl mb-6">Past Reports</h3>
-
-          {pastBookings.length === 0 ? (
-            <p className="text-n-cream-muted text-sm">No bookings reported yet.</p>
-          ) : (
-            <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[560px]">
-                  <thead>
-                    <tr className="border-b border-n-border">
-                      <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Traveler</th>
-                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Dates</th>
-                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Amount</th>
-                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Commission</th>
-                      <th className="eyebrow text-[10px] text-center py-3 px-5 font-medium">Paid</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pastBookings.map(b => (
-                      <tr key={b.id} className="border-b border-n-border/50 last:border-0">
-                        <td className="py-3.5 px-5 text-n-cream font-medium">{b.traveler_name}</td>
-                        <td className="py-3.5 px-3 text-n-cream-muted">{b.travel_dates}</td>
-                        <td className="py-3.5 px-3 text-right text-n-cream">{formatCurrency(b.booking_amount)}</td>
-                        <td className="py-3.5 px-3 text-right text-n-gold font-medium">
-                          {formatCurrency(b.commission_owed)}
-                        </td>
-                        <td className="py-3.5 px-5 text-center">
-                          {b.commission_paid ? (
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
-                              Paid
-                            </span>
-                          ) : (
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-cream/20 text-n-cream-muted">
-                              Pending
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
+        </section>
+        )}
       </main>
+    </div>
+  )
+}
+
+function KPICard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="bg-n-surface border border-n-border rounded-nomara p-5 relative overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-[3px] bg-n-gold" />
+      <p className={`text-[28px] md:text-[32px] font-light mt-1 mb-1 ${highlight ? 'text-n-gold' : 'text-n-cream'}`}>
+        {value}
+      </p>
+      <p className="eyebrow text-[10px]">{label}</p>
     </div>
   )
 }
