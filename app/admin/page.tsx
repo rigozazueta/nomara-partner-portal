@@ -97,9 +97,13 @@ interface PartnerApplication {
 
 export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false)
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotSent, setForgotSent] = useState(false)
 
   // Existing state
   const [bookings, setBookings] = useState<BookingReport[]>([])
@@ -178,13 +182,45 @@ export default function AdminDashboard() {
   }, [])
 
   useEffect(() => {
-    const isAuth = sessionStorage.getItem('nomara_admin_auth') === 'true'
-    if (isAuth) {
-      setAuthenticated(true)
-      fetchData()
-    } else {
-      setLoading(false)
-    }
+    // Check for existing Supabase Auth session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        // Verify this user is an admin
+        const { data: adminRow } = await supabase
+          .from('admin_users')
+          .select('id')
+          .eq('email', session.user.email)
+          .maybeSingle()
+
+        if (adminRow) {
+          setAuthenticated(true)
+          fetchData()
+        } else {
+          setLoading(false)
+        }
+      } else {
+        setLoading(false)
+      }
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        const { data: adminRow } = await supabase
+          .from('admin_users')
+          .select('id')
+          .eq('email', session.user.email)
+          .maybeSingle()
+
+        if (adminRow) {
+          setAuthenticated(true)
+          fetchData()
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setAuthenticated(false)
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [fetchData])
 
   // ─── Existing actions ──────────────────────────────
@@ -192,19 +228,15 @@ export default function AdminDashboard() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setAuthError('')
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, role: 'admin' }),
-    })
-    if (res.ok) {
-      sessionStorage.setItem('nomara_admin_auth', 'true')
-      sessionStorage.setItem('nomara_admin_pw', password)
-      setAuthenticated(true)
-      fetchData()
-    } else {
-      setAuthError('Incorrect password.')
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      setAuthError('Invalid email or password.')
+      return
     }
+
+    // The auth state listener will verify admin status and call fetchData
   }
 
   const markInvoiceSent = async (id: string) => {
@@ -330,15 +362,24 @@ export default function AdminDashboard() {
 
   // ─── Approve application ──────────────────────────
 
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`
+    }
+    return headers
+  }
+
   const approveApplication = async (appId: string) => {
     setApprovingAppId(appId)
     setApproveMessage(null)
     try {
-      const adminPw = sessionStorage.getItem('nomara_admin_pw') || password
+      const headers = await getAuthHeaders()
       const res = await fetch('/api/approve-application', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ application_id: appId, admin_password: adminPw }),
+        headers,
+        body: JSON.stringify({ application_id: appId }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -360,11 +401,11 @@ export default function AdminDashboard() {
     setInvitingOperatorId(operatorId)
     setInviteMessage(null)
     try {
-      const adminPw = sessionStorage.getItem('nomara_admin_pw') || password
+      const headers = await getAuthHeaders()
       const res = await fetch('/api/invite-operator', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operator_id: operatorId, admin_password: adminPw }),
+        headers,
+        body: JSON.stringify({ operator_id: operatorId }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -459,22 +500,86 @@ export default function AdminDashboard() {
           <div className="w-[50px] h-[1px] bg-n-gold mx-auto mt-1 mb-4" />
           <p className="eyebrow tracking-[0.15em]">Admin Dashboard</p>
         </div>
-        <form onSubmit={handleLogin} className="w-full max-w-sm">
-          <input
-            type="password"
-            placeholder="Enter admin password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            className="mb-3"
-          />
-          {authError && <p className="text-red-400 text-sm mb-3">{authError}</p>}
-          <button
-            type="submit"
-            className="w-full bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium py-3.5 rounded-nomara transition-colors"
-          >
-            Enter Dashboard
-          </button>
-        </form>
+
+        {showForgotPassword ? (
+          <div className="w-full max-w-sm">
+            {forgotSent ? (
+              <div className="bg-n-surface border border-n-gold/30 rounded-nomara p-5 text-center">
+                <span className="text-n-gold text-xl block mb-2">✦</span>
+                <p className="text-n-cream mb-1">Reset link sent!</p>
+                <p className="text-n-cream-muted text-sm mb-4">Check your email for a password reset link.</p>
+                <button
+                  onClick={() => { setShowForgotPassword(false); setForgotSent(false); setForgotEmail('') }}
+                  className="text-n-gold hover:underline text-sm"
+                >
+                  ← Back to login
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={async (e) => {
+                e.preventDefault()
+                if (!forgotEmail) return
+                await supabase.auth.resetPasswordForEmail(forgotEmail, {
+                  redirectTo: `${window.location.origin}/operator/set-password`,
+                })
+                setForgotSent(true)
+              }} className="space-y-3">
+                <p className="text-n-cream text-sm text-center mb-2">Enter your admin email to receive a reset link.</p>
+                <input
+                  type="email"
+                  placeholder="Admin email address"
+                  value={forgotEmail}
+                  onChange={e => setForgotEmail(e.target.value)}
+                  required
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium py-3.5 rounded-nomara transition-colors"
+                >
+                  Send Reset Link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="w-full text-n-cream-muted hover:text-n-cream text-sm transition-colors py-1"
+                >
+                  ← Back to login
+                </button>
+              </form>
+            )}
+          </div>
+        ) : (
+          <form onSubmit={handleLogin} className="w-full max-w-sm space-y-3">
+            <input
+              type="email"
+              placeholder="Admin email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+            {authError && <p className="text-red-400 text-sm">{authError}</p>}
+            <button
+              type="submit"
+              className="w-full bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium py-3.5 rounded-nomara transition-colors"
+            >
+              Enter Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="w-full text-n-cream-muted hover:text-n-cream text-sm transition-colors py-1"
+            >
+              Forgot password?
+            </button>
+          </form>
+        )}
       </div>
     )
   }
@@ -491,8 +596,8 @@ export default function AdminDashboard() {
             <span className="eyebrow text-[10px] tracking-[0.15em] mt-0.5">Admin</span>
           </div>
           <button
-            onClick={() => {
-              sessionStorage.removeItem('nomara_admin_auth')
+            onClick={async () => {
+              await supabase.auth.signOut()
               setAuthenticated(false)
             }}
             className="text-n-cream-muted hover:text-n-cream text-sm transition-colors"

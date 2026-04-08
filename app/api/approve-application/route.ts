@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { verifyAdmin } from '@/lib/verify-admin'
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_Xo7c99AE_AF5mgpVnib668RcUEgCkYSwu'
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://partners.nomaratravel.com'
 
 export async function POST(req: NextRequest) {
   try {
-    const { application_id, admin_password } = await req.json()
+    const body = await req.json()
+    const { application_id } = body
 
-    // Verify admin
-    if (admin_password !== process.env.ADMIN_PASSWORD) {
+    // Verify admin via Supabase Auth or legacy password
+    const isAdmin = await verifyAdmin(req, body)
+    if (!isAdmin) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
     }
 

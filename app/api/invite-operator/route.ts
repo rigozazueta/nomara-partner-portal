@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { verifyAdmin } from '@/lib/verify-admin'
 
 export async function POST(req: NextRequest) {
   try {
-    const { operator_id, admin_password } = await req.json()
+    const body = await req.json()
+    const { operator_id } = body
 
-    // Verify admin password
-    if (admin_password !== process.env.ADMIN_PASSWORD) {
+    // Verify admin via Supabase Auth or legacy password
+    const isAdmin = await verifyAdmin(req, body)
+    if (!isAdmin) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
     }
 
