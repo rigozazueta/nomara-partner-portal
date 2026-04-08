@@ -93,6 +93,37 @@ interface PartnerApplication {
   created_at: string
 }
 
+interface RetreatListing {
+  id: string
+  slug: string | null
+  retreat_name: string
+  operator_id: string
+  hero_image_url: string | null
+  tagline: string | null
+  about_trip: string | null
+  results_list: string[] | null
+  inclusions: string[] | null
+  important_info: string | null
+  listing_status: string
+  listing_submitted_at: string | null
+  listing_published_at: string | null
+  retreat_operators: { operator_name: string } | null
+}
+
+interface RetreatWaitlist {
+  id: string
+  retreat_id: string
+  full_name: string
+  email: string
+  phone: string | null
+  travel_dates: string | null
+  party_size: number | null
+  message: string | null
+  status: string
+  created_at: string
+  retreats: { retreat_name: string } | null
+}
+
 // ─── Component ───────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -142,6 +173,22 @@ export default function AdminDashboard() {
   const [approvingAppId, setApprovingAppId] = useState<string | null>(null)
   const [approveMessage, setApproveMessage] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null)
 
+  // Retreat listings state
+  const [retreatListings, setRetreatListings] = useState<RetreatListing[]>([])
+  const [editingListingId, setEditingListingId] = useState<string | null>(null)
+  const [listingForm, setListingForm] = useState({
+    hero_image_url: '',
+    tagline: '',
+    about_trip: '',
+    results_list: '',
+    inclusions: '',
+    important_info: '',
+  })
+  const [listingSubmitting, setListingSubmitting] = useState(false)
+
+  // Waitlist state
+  const [waitlists, setWaitlists] = useState<RetreatWaitlist[]>([])
+
   // Operator invite state
   const [invitingOperatorId, setInvitingOperatorId] = useState<string | null>(null)
   const [inviteMessage, setInviteMessage] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null)
@@ -149,7 +196,7 @@ export default function AdminDashboard() {
   // ─── Data fetching ─────────────────────────────────
 
   const fetchData = useCallback(async () => {
-    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes] = await Promise.all([
+    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes, listingsRes, waitlistsRes] = await Promise.all([
       supabase
         .from('operator_booking_reports')
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
@@ -162,6 +209,14 @@ export default function AdminDashboard() {
         .order('created_at', { ascending: false }),
       supabase.from('referral_clicks').select('id', { count: 'exact', head: true }),
       supabase.from('partner_applications').select('*').order('created_at', { ascending: false }),
+      supabase
+        .from('retreats')
+        .select('id, slug, retreat_name, operator_id, hero_image_url, tagline, about_trip, results_list, inclusions, important_info, listing_status, listing_submitted_at, listing_published_at, retreat_operators(operator_name)')
+        .order('listing_submitted_at', { ascending: false, nullsFirst: false }),
+      supabase
+        .from('retreat_waitlists')
+        .select('*, retreats(retreat_name)')
+        .order('created_at', { ascending: false }),
     ])
 
     if (bookingsRes.data) setBookings(bookingsRes.data as unknown as BookingReport[])
@@ -178,6 +233,8 @@ export default function AdminDashboard() {
     }
     setTotalClicks(clickCountRes.count ?? 0)
     if (appsRes.data) setApplications(appsRes.data as PartnerApplication[])
+    if (listingsRes.data) setRetreatListings(listingsRes.data as unknown as RetreatListing[])
+    if (waitlistsRes.data) setWaitlists(waitlistsRes.data as unknown as RetreatWaitlist[])
     setLoading(false)
   }, [])
 
@@ -369,6 +426,60 @@ export default function AdminDashboard() {
       headers['Authorization'] = `Bearer ${session.access_token}`
     }
     return headers
+  }
+
+  // ─── Retreat listings ─────────────────────────────
+
+  const startEditingListing = (listing: RetreatListing) => {
+    setEditingListingId(listing.id)
+    setListingForm({
+      hero_image_url: listing.hero_image_url || '',
+      tagline: listing.tagline || '',
+      about_trip: listing.about_trip || '',
+      results_list: listing.results_list?.join('\n') || '',
+      inclusions: listing.inclusions?.join('\n') || '',
+      important_info: listing.important_info || '',
+    })
+  }
+
+  const publishListing = async (retreatId: string, action: 'publish' | 'save_draft' | 'unpublish') => {
+    setListingSubmitting(true)
+    try {
+      const headers = await getAuthHeaders()
+      const updates = action === 'save_draft' || action === 'publish' ? {
+        hero_image_url: listingForm.hero_image_url || null,
+        tagline: listingForm.tagline || null,
+        about_trip: listingForm.about_trip || null,
+        results_list: listingForm.results_list
+          ? listingForm.results_list.split('\n').map(s => s.trim()).filter(Boolean)
+          : null,
+        inclusions: listingForm.inclusions
+          ? listingForm.inclusions.split('\n').map(s => s.trim()).filter(Boolean)
+          : null,
+        important_info: listingForm.important_info || null,
+      } : {}
+
+      const res = await fetch('/api/publish-retreat', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ retreat_id: retreatId, action, updates }),
+      })
+
+      if (res.ok) {
+        setEditingListingId(null)
+        fetchData()
+      }
+    } catch (err) {
+      console.error(err)
+    }
+    setListingSubmitting(false)
+  }
+
+  // ─── Waitlist ─────────────────────────────────────
+
+  const updateWaitlistStatus = async (id: string, status: string) => {
+    await supabase.from('retreat_waitlists').update({ status }).eq('id', id)
+    fetchData()
   }
 
   const approveApplication = async (appId: string) => {
@@ -1256,6 +1367,258 @@ export default function AdminDashboard() {
                     <div key={a.id} className="mb-3 last:mb-0">
                       <span className="text-n-cream text-sm font-medium">{a.contact_name}:</span>
                       <span className="text-n-cream-muted text-sm ml-2">{a.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ═══ Retreat Listings ═══ */}
+        <section>
+          <p className="eyebrow mb-3">✦ Retreat Listings</p>
+          <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+            Public Retreat Pages ({retreatListings.filter(l => l.listing_status === 'submitted').length} pending review)
+          </h3>
+
+          {retreatListings.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-6">
+              <p className="text-n-cream-muted text-sm">No retreats yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {retreatListings.map(listing => {
+                const isEditing = editingListingId === listing.id
+                const statusColors: Record<string, string> = {
+                  draft: 'border-n-cream/20 text-n-cream-muted',
+                  submitted: 'border-n-gold/40 text-n-gold bg-n-gold/5',
+                  published: 'bg-n-gold/20 text-n-gold border-n-gold/20',
+                  archived: 'border-n-cream/20 text-n-cream-muted',
+                }
+                const statusLabels: Record<string, string> = {
+                  draft: 'Draft',
+                  submitted: 'Needs Review',
+                  published: 'Published',
+                  archived: 'Archived',
+                }
+
+                return (
+                  <div key={listing.id} className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+                    <div className="p-5 flex flex-wrap items-start justify-between gap-4 border-b border-n-border">
+                      <div>
+                        <div className="flex items-center gap-3 mb-1">
+                          <h4 className="text-n-cream font-medium">{listing.retreat_name}</h4>
+                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${statusColors[listing.listing_status] || statusColors.draft}`}>
+                            {statusLabels[listing.listing_status] || 'Draft'}
+                          </span>
+                        </div>
+                        <p className="text-n-cream-muted text-xs">
+                          {listing.retreat_operators?.operator_name || '—'}
+                          {listing.listing_submitted_at && ` • Submitted ${new Date(listing.listing_submitted_at).toLocaleDateString()}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {listing.listing_status === 'published' && listing.slug && (
+                          <a
+                            href={`/retreats/${listing.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 text-xs text-n-gold hover:underline"
+                          >
+                            View →
+                          </a>
+                        )}
+                        {!isEditing && (
+                          <button
+                            onClick={() => startEditingListing(listing)}
+                            className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium"
+                          >
+                            Review & Edit
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isEditing && (
+                      <div className="p-5 md:p-6 space-y-4">
+                        <div>
+                          <label className="eyebrow block mb-2">Hero Image URL</label>
+                          <input
+                            type="url"
+                            value={listingForm.hero_image_url}
+                            onChange={e => setListingForm({ ...listingForm, hero_image_url: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">Tagline</label>
+                          <input
+                            type="text"
+                            value={listingForm.tagline}
+                            onChange={e => setListingForm({ ...listingForm, tagline: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">About Your Trip</label>
+                          <textarea
+                            value={listingForm.about_trip}
+                            onChange={e => setListingForm({ ...listingForm, about_trip: e.target.value })}
+                            rows={5}
+                            className="resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">Results (one per line)</label>
+                          <textarea
+                            value={listingForm.results_list}
+                            onChange={e => setListingForm({ ...listingForm, results_list: e.target.value })}
+                            rows={4}
+                            className="resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">Inclusions (one per line)</label>
+                          <textarea
+                            value={listingForm.inclusions}
+                            onChange={e => setListingForm({ ...listingForm, inclusions: e.target.value })}
+                            rows={4}
+                            className="resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="eyebrow block mb-2">Important Info</label>
+                          <textarea
+                            value={listingForm.important_info}
+                            onChange={e => setListingForm({ ...listingForm, important_info: e.target.value })}
+                            rows={3}
+                            className="resize-none"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap gap-3 pt-2">
+                          <button
+                            onClick={() => publishListing(listing.id, 'save_draft')}
+                            disabled={listingSubmitting}
+                            className="px-4 py-2 text-sm bg-n-bg hover:bg-[#153a22] border border-n-cream/20 text-n-cream rounded-nomara transition-colors disabled:opacity-50"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => publishListing(listing.id, 'publish')}
+                            disabled={listingSubmitting}
+                            className="px-4 py-2 text-sm bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium rounded-nomara transition-colors disabled:opacity-50"
+                          >
+                            {listingSubmitting ? 'Working...' : 'Save & Publish'}
+                          </button>
+                          {listing.listing_status === 'published' && (
+                            <button
+                              onClick={() => publishListing(listing.id, 'unpublish')}
+                              disabled={listingSubmitting}
+                              className="px-4 py-2 text-sm text-n-cream-muted hover:text-n-cream transition-colors"
+                            >
+                              Unpublish
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setEditingListingId(null)}
+                            className="px-4 py-2 text-sm text-n-cream-muted hover:text-n-cream transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* ═══ Waitlist Signups ═══ */}
+        <section>
+          <p className="eyebrow mb-3">✦ Waitlist Signups</p>
+          <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+            Traveler Inquiries ({waitlists.filter(w => w.status === 'new').length} new)
+          </h3>
+
+          {waitlists.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-6">
+              <p className="text-n-cream-muted text-sm">No waitlist signups yet.</p>
+            </div>
+          ) : (
+            <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[900px]">
+                  <thead>
+                    <tr className="border-b border-n-border">
+                      <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Name</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Email</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Retreat</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Dates</th>
+                      <th className="eyebrow text-[10px] text-center py-3 px-3 font-medium">Party</th>
+                      <th className="eyebrow text-[10px] text-center py-3 px-3 font-medium">Status</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-5 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {waitlists.map(w => (
+                      <tr key={w.id} className="border-b border-n-border/50 last:border-0">
+                        <td className="py-3.5 px-5 text-n-cream font-medium">{w.full_name}</td>
+                        <td className="py-3.5 px-3">
+                          <a href={`mailto:${w.email}`} className="text-n-gold hover:underline text-sm">{w.email}</a>
+                        </td>
+                        <td className="py-3.5 px-3 text-n-cream-muted max-w-[180px] truncate">
+                          {w.retreats?.retreat_name || '—'}
+                        </td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">{w.travel_dates || '—'}</td>
+                        <td className="py-3.5 px-3 text-center text-n-cream">{w.party_size || '—'}</td>
+                        <td className="py-3.5 px-3 text-center">
+                          {w.status === 'new' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-gold/40 text-n-gold">
+                              New
+                            </span>
+                          )}
+                          {w.status === 'contacted' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-n-cream/20 text-n-cream-muted">
+                              Contacted
+                            </span>
+                          )}
+                          {w.status === 'booked' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-n-gold/20 text-n-gold">
+                              Booked
+                            </span>
+                          )}
+                          {w.status === 'declined' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-red-400/30 text-red-400/80">
+                              Declined
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-5 text-right">
+                          <select
+                            value={w.status}
+                            onChange={e => updateWaitlistStatus(w.id, e.target.value)}
+                            className="!w-auto text-xs !py-1.5 !px-2"
+                          >
+                            <option value="new">New</option>
+                            <option value="contacted">Contacted</option>
+                            <option value="booked">Booked</option>
+                            <option value="declined">Declined</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {waitlists.some(w => w.message) && (
+                <div className="border-t border-n-border p-5">
+                  <p className="eyebrow text-[10px] mb-3">Messages</p>
+                  {waitlists.filter(w => w.message).map(w => (
+                    <div key={w.id} className="mb-3 last:mb-0">
+                      <span className="text-n-cream text-sm font-medium">{w.full_name} ({w.retreats?.retreat_name}):</span>
+                      <span className="text-n-cream-muted text-sm ml-2">{w.message}</span>
                     </div>
                   ))}
                 </div>

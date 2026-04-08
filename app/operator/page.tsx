@@ -43,6 +43,21 @@ interface ReferralLink {
   retreats: { retreat_name: string } | null
 }
 
+interface RetreatListing {
+  id: string
+  slug: string | null
+  retreat_name: string
+  hero_image_url: string | null
+  tagline: string | null
+  about_trip: string | null
+  results_list: string[] | null
+  inclusions: string[] | null
+  important_info: string | null
+  listing_status: string
+  listing_submitted_at: string | null
+  listing_published_at: string | null
+}
+
 export default function OperatorPortal() {
   const [authenticated, setAuthenticated] = useState(false)
   const [email, setEmail] = useState('')
@@ -69,6 +84,20 @@ export default function OperatorPortal() {
   const [referralLinks, setReferralLinks] = useState<ReferralLink[]>([])
   const [showBookingForm, setShowBookingForm] = useState(false)
 
+  // Retreat listing state
+  const [retreatListings, setRetreatListings] = useState<RetreatListing[]>([])
+  const [editingListingId, setEditingListingId] = useState<string | null>(null)
+  const [listingForm, setListingForm] = useState({
+    hero_image_url: '',
+    tagline: '',
+    about_trip: '',
+    results_list: '',
+    inclusions: '',
+    important_info: '',
+  })
+  const [listingSubmitting, setListingSubmitting] = useState(false)
+  const [listingMessage, setListingMessage] = useState('')
+
   // Auto-select retreat if operator only has one
   useEffect(() => {
     if (retreats.length === 1 && !selectedRetreatId) {
@@ -83,16 +112,21 @@ export default function OperatorPortal() {
 
   const fetchData = useCallback(async () => {
     // RLS auto-scopes these queries to the authenticated operator
-    const [retreatRes, operatorRes, bookingsRes] = await Promise.all([
+    const [retreatRes, operatorRes, bookingsRes, listingsRes] = await Promise.all([
       supabase.from('retreats').select('id, retreat_name, operator_id, location_town').order('retreat_name'),
       supabase.from('retreat_operators').select('id, operator_name, commission_rate'),
       supabase
         .from('operator_booking_reports')
         .select('id, traveler_name, travel_dates, booking_amount, commission_owed, commission_paid, submitted_at, retreats(retreat_name), retreat_operators(operator_name)')
         .order('submitted_at', { ascending: false }),
+      supabase
+        .from('retreats')
+        .select('id, slug, retreat_name, hero_image_url, tagline, about_trip, results_list, inclusions, important_info, listing_status, listing_submitted_at, listing_published_at')
+        .order('retreat_name'),
     ])
 
     if (retreatRes.data) setRetreats(retreatRes.data)
+    if (listingsRes.data) setRetreatListings(listingsRes.data as RetreatListing[])
     if (operatorRes.data && operatorRes.data.length > 0) {
       const op = operatorRes.data[0]
       setCurrentOperator(op)
@@ -166,6 +200,66 @@ export default function OperatorPortal() {
     await supabase.auth.signOut()
     setAuthenticated(false)
     setCurrentOperator(null)
+  }
+
+  const startEditingListing = (listing: RetreatListing) => {
+    setEditingListingId(listing.id)
+    setListingForm({
+      hero_image_url: listing.hero_image_url || '',
+      tagline: listing.tagline || '',
+      about_trip: listing.about_trip || '',
+      results_list: listing.results_list?.join('\n') || '',
+      inclusions: listing.inclusions?.join('\n') || '',
+      important_info: listing.important_info || '',
+    })
+  }
+
+  const cancelEditingListing = () => {
+    setEditingListingId(null)
+    setListingMessage('')
+  }
+
+  const saveListing = async (action: 'save_draft' | 'submit_for_review') => {
+    if (!editingListingId) return
+    setListingSubmitting(true)
+    setListingMessage('')
+
+    const patch: Record<string, unknown> = {
+      hero_image_url: listingForm.hero_image_url || null,
+      tagline: listingForm.tagline || null,
+      about_trip: listingForm.about_trip || null,
+      results_list: listingForm.results_list
+        ? listingForm.results_list.split('\n').map(s => s.trim()).filter(Boolean)
+        : null,
+      inclusions: listingForm.inclusions
+        ? listingForm.inclusions.split('\n').map(s => s.trim()).filter(Boolean)
+        : null,
+      important_info: listingForm.important_info || null,
+    }
+
+    if (action === 'submit_for_review') {
+      patch.listing_status = 'submitted'
+      patch.listing_submitted_at = new Date().toISOString()
+    }
+
+    const { error } = await supabase
+      .from('retreats')
+      .update(patch)
+      .eq('id', editingListingId)
+
+    if (error) {
+      setListingMessage('Error saving. Please try again.')
+      setListingSubmitting(false)
+      return
+    }
+
+    setListingMessage(action === 'submit_for_review' ? 'Submitted for review!' : 'Draft saved.')
+    setListingSubmitting(false)
+    fetchData()
+    setTimeout(() => {
+      setEditingListingId(null)
+      setListingMessage('')
+    }, 2000)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -376,6 +470,180 @@ export default function OperatorPortal() {
               </>
             )
           })()}
+        </section>
+
+        {/* ═══ My Retreat Listing Section ═══ */}
+        <section>
+          <div className="mb-5">
+            <p className="eyebrow mb-3">✦ My Retreat Listing</p>
+            <h3 className="font-serif-italic text-n-cream text-2xl">
+              Public Retreat Page
+            </h3>
+            <p className="text-n-cream-muted text-sm mt-1">
+              Your retreat&apos;s public listing on the Nomara directory.
+            </p>
+          </div>
+
+          {retreatListings.length === 0 ? (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-8 text-center">
+              <span className="text-n-gold text-2xl block mb-3">✦</span>
+              <p className="text-n-cream font-medium mb-2">No retreats linked yet</p>
+              <p className="text-n-cream-muted text-sm max-w-md mx-auto">
+                Contact Nomara to add your retreat to the directory.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {retreatListings.map(listing => {
+                const isEditing = editingListingId === listing.id
+                const statusColors: Record<string, string> = {
+                  draft: 'border-n-cream/20 text-n-cream-muted',
+                  submitted: 'border-n-gold/40 text-n-gold',
+                  published: 'bg-n-gold/20 text-n-gold border border-n-gold/20',
+                  archived: 'border-n-cream/20 text-n-cream-muted',
+                }
+                const statusLabels: Record<string, string> = {
+                  draft: 'Draft',
+                  submitted: 'In Review',
+                  published: 'Published',
+                  archived: 'Archived',
+                }
+
+                return (
+                  <div key={listing.id} className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+                    {/* Card header */}
+                    <div className="p-5 md:p-6 flex flex-wrap items-start justify-between gap-4 border-b border-n-border">
+                      <div>
+                        <div className="flex items-center gap-3 mb-1">
+                          <h4 className="text-n-cream font-medium text-lg">{listing.retreat_name}</h4>
+                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${statusColors[listing.listing_status] || statusColors.draft}`}>
+                            {statusLabels[listing.listing_status] || 'Draft'}
+                          </span>
+                        </div>
+                        {listing.listing_status === 'published' && listing.slug && (
+                          <a
+                            href={`/retreats/${listing.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-n-gold hover:underline text-sm"
+                          >
+                            View public page →
+                          </a>
+                        )}
+                      </div>
+                      {!isEditing && (
+                        <button
+                          onClick={() => startEditingListing(listing)}
+                          className="px-4 py-2 text-sm bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium rounded-nomara transition-colors whitespace-nowrap"
+                        >
+                          {listing.about_trip ? 'Edit Listing' : 'Create Listing'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Editor form */}
+                    {isEditing && (
+                      <div className="p-5 md:p-8 space-y-5">
+                        <div>
+                          <label className="eyebrow block mb-2">Hero Image URL</label>
+                          <input
+                            type="url"
+                            value={listingForm.hero_image_url}
+                            onChange={e => setListingForm({ ...listingForm, hero_image_url: e.target.value })}
+                            placeholder="https://..."
+                          />
+                          <p className="text-n-cream-muted text-xs mt-1">Paste a direct image URL (Unsplash, your website, etc.)</p>
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">Tagline</label>
+                          <input
+                            type="text"
+                            value={listingForm.tagline}
+                            onChange={e => setListingForm({ ...listingForm, tagline: e.target.value })}
+                            placeholder="One-line pitch (e.g. No experience needed. Surf, yoga, and mindful living.)"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">About Your Trip</label>
+                          <textarea
+                            value={listingForm.about_trip}
+                            onChange={e => setListingForm({ ...listingForm, about_trip: e.target.value })}
+                            rows={6}
+                            placeholder="Describe what makes your retreat special. What's the vibe? Who is it for?"
+                            className="resize-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">Results (one per line)</label>
+                          <textarea
+                            value={listingForm.results_list}
+                            onChange={e => setListingForm({ ...listingForm, results_list: e.target.value })}
+                            rows={5}
+                            placeholder={'Solid surf foundations\nStronger core, better balance\nBreath tools to calm stress\nDeeper, more restful sleep'}
+                            className="resize-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">Inclusions (one per line)</label>
+                          <textarea
+                            value={listingForm.inclusions}
+                            onChange={e => setListingForm({ ...listingForm, inclusions: e.target.value })}
+                            rows={5}
+                            placeholder={'6-night / 7-day villa stay\n3 gourmet meals daily\n5x 90-minute surf sessions\nAirport transfers'}
+                            className="resize-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="eyebrow block mb-2">Important Info</label>
+                          <textarea
+                            value={listingForm.important_info}
+                            onChange={e => setListingForm({ ...listingForm, important_info: e.target.value })}
+                            rows={4}
+                            placeholder="Anything travelers should know before booking (health, dietary, cancellation, etc.)"
+                            className="resize-none"
+                          />
+                        </div>
+
+                        {listingMessage && (
+                          <p className={`text-sm ${listingMessage.includes('Error') ? 'text-red-400' : 'text-n-gold'}`}>
+                            {listingMessage}
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap gap-3 pt-2">
+                          <button
+                            onClick={() => saveListing('save_draft')}
+                            disabled={listingSubmitting}
+                            className="px-5 py-2.5 bg-n-surface hover:bg-[#153a22] border border-n-cream/20 text-n-cream font-medium rounded-nomara transition-colors disabled:opacity-50"
+                          >
+                            Save Draft
+                          </button>
+                          <button
+                            onClick={() => saveListing('submit_for_review')}
+                            disabled={listingSubmitting}
+                            className="px-5 py-2.5 bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium rounded-nomara transition-colors disabled:opacity-50"
+                          >
+                            {listingSubmitting ? 'Saving...' : 'Submit for Review'}
+                          </button>
+                          <button
+                            onClick={cancelEditingListing}
+                            className="px-5 py-2.5 text-n-cream-muted hover:text-n-cream text-sm transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         {/* ═══ Referral Links Section ═══ */}
