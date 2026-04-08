@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { formatCurrency } from '@/lib/utils'
 import WaitlistForm from './WaitlistForm'
-import HeroCarousel from './HeroCarousel'
+import ItineraryTabs from './ItineraryTabs'
 
 const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(3).png'
 
@@ -43,6 +43,14 @@ interface Review {
   created_at: string
 }
 
+interface ItineraryDay {
+  id: string
+  day_number: number
+  title: string
+  activities: string[] | null
+  image_url: string | null
+}
+
 export default async function RetreatDetail({ params }: { params: { slug: string } }) {
   const { data: retreat } = await supabaseAdmin
     .from('retreats')
@@ -58,21 +66,23 @@ export default async function RetreatDetail({ params }: { params: { slug: string
   const r = retreat as unknown as Retreat
   const location = [r.location_town, r.location_region, r.location_country].filter(Boolean).join(', ')
 
-  // Build gallery array: hero first, then gallery_urls
-  const allImages = [
-    ...(r.hero_image_url ? [r.hero_image_url] : []),
-    ...(r.gallery_urls || []),
-  ]
-
-  // Fetch approved reviews
-  const { data: reviewsData } = await supabaseAdmin
-    .from('retreat_reviews')
-    .select('id, reviewer_name, rating, review_text, travel_date, created_at')
-    .eq('retreat_id', r.id)
-    .eq('approved', true)
-    .order('created_at', { ascending: false })
+  // Fetch approved reviews + itinerary days in parallel
+  const [{ data: reviewsData }, { data: itineraryData }] = await Promise.all([
+    supabaseAdmin
+      .from('retreat_reviews')
+      .select('id, reviewer_name, rating, review_text, travel_date, created_at')
+      .eq('retreat_id', r.id)
+      .eq('approved', true)
+      .order('created_at', { ascending: false }),
+    supabaseAdmin
+      .from('retreat_itinerary_days')
+      .select('id, day_number, title, activities, image_url')
+      .eq('retreat_id', r.id)
+      .order('day_number'),
+  ])
 
   const reviews = (reviewsData || []) as Review[]
+  const itineraryDays = (itineraryData || []) as ItineraryDay[]
   const avgRating = reviews.length > 0
     ? reviews.reduce((sum, rev) => sum + rev.rating, 0) / reviews.length
     : null
@@ -100,8 +110,22 @@ export default async function RetreatDetail({ params }: { params: { slug: string
         </div>
       </header>
 
-      {/* Hero Carousel */}
-      <HeroCarousel images={allImages} alt={r.retreat_name} />
+      {/* Hero */}
+      <div className="relative w-full aspect-[16/9] md:aspect-[21/9] max-h-[560px] bg-n-surface overflow-hidden">
+        {r.hero_image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={r.hero_image_url}
+            alt={r.retreat_name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <span className="text-n-gold text-6xl">✦</span>
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-n-bg via-n-bg/30 to-transparent pointer-events-none" />
+      </div>
 
       <main className="max-w-6xl mx-auto px-4 md:px-8 -mt-20 md:-mt-28 relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
@@ -173,6 +197,17 @@ export default async function RetreatDetail({ params }: { params: { slug: string
                     </li>
                   ))}
                 </ul>
+              </section>
+            )}
+
+            {/* Day-by-Day Itinerary */}
+            {itineraryDays.length > 0 && (
+              <section className="mb-10">
+                <p className="eyebrow mb-3">✦ Day-by-Day</p>
+                <h2 className="font-serif-italic text-n-cream text-2xl md:text-3xl mb-5">
+                  Your Itinerary
+                </h2>
+                <ItineraryTabs days={itineraryDays} />
               </section>
             )}
 

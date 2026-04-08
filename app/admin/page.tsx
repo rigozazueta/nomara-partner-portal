@@ -127,6 +127,15 @@ interface RetreatReview {
   retreats: { retreat_name: string } | null
 }
 
+interface ItineraryDay {
+  id: string
+  retreat_id: string
+  day_number: number
+  title: string
+  activities: string[] | null
+  image_url: string | null
+}
+
 interface RetreatWaitlist {
   id: string
   retreat_id: string
@@ -206,6 +215,16 @@ export default function AdminDashboard() {
   })
   const [listingSubmitting, setListingSubmitting] = useState(false)
 
+  // Itinerary state (keyed by retreat_id)
+  const [itineraryDays, setItineraryDays] = useState<ItineraryDay[]>([])
+  const [editingItineraryRetreat, setEditingItineraryRetreat] = useState<string | null>(null)
+  const [newDay, setNewDay] = useState({
+    day_number: 1,
+    title: '',
+    activities: '',
+    image_url: '',
+  })
+
   // Reviews state
   const [reviews, setReviews] = useState<RetreatReview[]>([])
   const [newReview, setNewReview] = useState({
@@ -227,7 +246,7 @@ export default function AdminDashboard() {
   // ─── Data fetching ─────────────────────────────────
 
   const fetchData = useCallback(async () => {
-    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes, listingsRes, waitlistsRes, reviewsRes] = await Promise.all([
+    const [bookingsRes, operatorsRes, retreatsRes, linksRes, clickCountRes, appsRes, listingsRes, waitlistsRes, reviewsRes, itineraryRes] = await Promise.all([
       supabase
         .from('operator_booking_reports')
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
@@ -252,6 +271,10 @@ export default function AdminDashboard() {
         .from('retreat_reviews')
         .select('*, retreats(retreat_name)')
         .order('created_at', { ascending: false }),
+      supabase
+        .from('retreat_itinerary_days')
+        .select('*')
+        .order('day_number'),
     ])
 
     if (bookingsRes.data) setBookings(bookingsRes.data as unknown as BookingReport[])
@@ -271,6 +294,7 @@ export default function AdminDashboard() {
     if (listingsRes.data) setRetreatListings(listingsRes.data as unknown as RetreatListing[])
     if (waitlistsRes.data) setWaitlists(waitlistsRes.data as unknown as RetreatWaitlist[])
     if (reviewsRes.data) setReviews(reviewsRes.data as unknown as RetreatReview[])
+    if (itineraryRes.data) setItineraryDays(itineraryRes.data as ItineraryDay[])
     setLoading(false)
   }, [])
 
@@ -552,6 +576,33 @@ export default function AdminDashboard() {
 
   const deleteReview = async (id: string) => {
     await supabase.from('retreat_reviews').delete().eq('id', id)
+    fetchData()
+  }
+
+  // ─── Itinerary ──────────────────────────────────
+
+  const addDay = async (retreatId: string) => {
+    if (!newDay.title) return
+    await supabase.from('retreat_itinerary_days').insert({
+      retreat_id: retreatId,
+      day_number: newDay.day_number,
+      title: newDay.title,
+      activities: newDay.activities
+        ? newDay.activities.split('\n').map(s => s.trim()).filter(Boolean)
+        : null,
+      image_url: newDay.image_url || null,
+    })
+    setNewDay({ day_number: newDay.day_number + 1, title: '', activities: '', image_url: '' })
+    fetchData()
+  }
+
+  const deleteDay = async (id: string) => {
+    await supabase.from('retreat_itinerary_days').delete().eq('id', id)
+    fetchData()
+  }
+
+  const updateDay = async (id: string, patch: Partial<ItineraryDay>) => {
+    await supabase.from('retreat_itinerary_days').update(patch).eq('id', id)
     fetchData()
   }
 
@@ -1503,15 +1554,133 @@ export default function AdminDashboard() {
                           </a>
                         )}
                         {!isEditing && (
-                          <button
-                            onClick={() => startEditingListing(listing)}
-                            className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium"
-                          >
-                            Review & Edit
-                          </button>
+                          <>
+                            <button
+                              onClick={() => setEditingItineraryRetreat(
+                                editingItineraryRetreat === listing.id ? null : listing.id
+                              )}
+                              className="px-3 py-1.5 border border-n-gold/40 text-n-gold text-xs rounded-lg hover:bg-n-gold/10 transition-colors whitespace-nowrap"
+                            >
+                              {editingItineraryRetreat === listing.id ? 'Hide Days' : 'Manage Days'}
+                            </button>
+                            <button
+                              onClick={() => startEditingListing(listing)}
+                              className="px-3 py-1.5 bg-n-gold text-n-bg text-xs rounded-lg hover:bg-[#d4b96a] transition-colors whitespace-nowrap font-medium"
+                            >
+                              Review & Edit
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
+
+                    {/* Itinerary Days Editor */}
+                    {editingItineraryRetreat === listing.id && !isEditing && (
+                      <div className="p-5 md:p-6 border-t border-n-border bg-n-bg/30">
+                        <p className="eyebrow text-[10px] mb-4">✦ Day-by-Day Itinerary</p>
+
+                        {/* Existing days */}
+                        <div className="space-y-3 mb-5">
+                          {itineraryDays
+                            .filter(d => d.retreat_id === listing.id)
+                            .map(d => (
+                              <div key={d.id} className="bg-n-surface border border-n-border rounded-nomara p-4">
+                                <div className="flex items-start justify-between gap-4 mb-2">
+                                  <div className="flex items-center gap-3 flex-1">
+                                    <span className="inline-flex items-center justify-center w-8 h-8 rounded-full border border-n-gold text-n-gold text-xs font-medium shrink-0">
+                                      {d.day_number}
+                                    </span>
+                                    <input
+                                      type="text"
+                                      defaultValue={d.title}
+                                      onBlur={e => {
+                                        if (e.target.value !== d.title) {
+                                          updateDay(d.id, { title: e.target.value })
+                                        }
+                                      }}
+                                      className="!py-1.5 !px-2 text-sm"
+                                    />
+                                  </div>
+                                  <button
+                                    onClick={() => deleteDay(d.id)}
+                                    className="px-2 py-1 border border-red-400/30 text-red-400/80 text-xs rounded hover:bg-red-400/10 transition-colors shrink-0"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                                <div className="pl-11 space-y-2">
+                                  <input
+                                    type="url"
+                                    defaultValue={d.image_url || ''}
+                                    onBlur={e => {
+                                      if (e.target.value !== (d.image_url || '')) {
+                                        updateDay(d.id, { image_url: e.target.value || null })
+                                      }
+                                    }}
+                                    placeholder="Image URL for this day"
+                                    className="!py-1.5 !px-2 text-xs"
+                                  />
+                                  <textarea
+                                    defaultValue={d.activities?.join('\n') || ''}
+                                    onBlur={e => {
+                                      const newList = e.target.value
+                                        ? e.target.value.split('\n').map(s => s.trim()).filter(Boolean)
+                                        : null
+                                      updateDay(d.id, { activities: newList })
+                                    }}
+                                    rows={3}
+                                    placeholder="Activities (one per line)"
+                                    className="!py-1.5 !px-2 text-xs resize-none"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+
+                        {/* Add new day form */}
+                        <div className="bg-n-surface border border-n-border border-dashed rounded-nomara p-4">
+                          <p className="text-n-cream-muted text-xs mb-3">Add a new day</p>
+                          <div className="grid grid-cols-[80px_1fr] gap-2 mb-2">
+                            <input
+                              type="number"
+                              value={newDay.day_number}
+                              onChange={e => setNewDay({ ...newDay, day_number: parseInt(e.target.value) || 1 })}
+                              min={1}
+                              placeholder="Day #"
+                              className="!py-1.5 !px-2 text-sm"
+                            />
+                            <input
+                              type="text"
+                              value={newDay.title}
+                              onChange={e => setNewDay({ ...newDay, title: e.target.value })}
+                              placeholder="Day title (e.g. Welcome to Medellín)"
+                              className="!py-1.5 !px-2 text-sm"
+                            />
+                          </div>
+                          <input
+                            type="url"
+                            value={newDay.image_url}
+                            onChange={e => setNewDay({ ...newDay, image_url: e.target.value })}
+                            placeholder="Image URL"
+                            className="!py-1.5 !px-2 text-xs mb-2"
+                          />
+                          <textarea
+                            value={newDay.activities}
+                            onChange={e => setNewDay({ ...newDay, activities: e.target.value })}
+                            rows={3}
+                            placeholder="Activities (one per line)"
+                            className="!py-1.5 !px-2 text-xs resize-none mb-3"
+                          />
+                          <button
+                            onClick={() => addDay(listing.id)}
+                            disabled={!newDay.title}
+                            className="px-4 py-2 bg-n-gold hover:bg-[#d4b96a] disabled:opacity-50 text-n-bg text-xs font-medium rounded-nomara transition-colors"
+                          >
+                            + Add Day
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {isEditing && (
                       <div className="p-5 md:p-6 space-y-4">
