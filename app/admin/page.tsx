@@ -14,6 +14,7 @@ interface Operator {
   operator_name: string
   email: string | null
   auth_user_id: string | null
+  commission_rate: number | null
 }
 
 interface Retreat {
@@ -42,6 +43,9 @@ interface BookingReport {
   reviewed: boolean
   invoice_sent: boolean
   invoice_sent_date: string | null
+  confirmation_status: 'pending_confirmation' | 'confirmed' | 'disputed'
+  confirmed_at: string | null
+  created_by: 'admin' | 'operator' | null
   retreat_operators: { operator_name: string } | null
   retreats: { retreat_name: string } | null
 }
@@ -199,6 +203,19 @@ export default function AdminDashboard() {
   const [approvingAppId, setApprovingAppId] = useState<string | null>(null)
   const [approveMessage, setApproveMessage] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null)
 
+  // File Booking form state
+  const [showFileBookingForm, setShowFileBookingForm] = useState(false)
+  const [fbOperatorId, setFbOperatorId] = useState('')
+  const [fbRetreatId, setFbRetreatId] = useState('')
+  const [fbTravelerName, setFbTravelerName] = useState('')
+  const [fbTravelerEmail, setFbTravelerEmail] = useState('')
+  const [fbTravelDates, setFbTravelDates] = useState('')
+  const [fbDurationDays, setFbDurationDays] = useState('')
+  const [fbBookingAmount, setFbBookingAmount] = useState('')
+  const [fbNotes, setFbNotes] = useState('')
+  const [fbSubmitting, setFbSubmitting] = useState(false)
+  const [fbMessage, setFbMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
   // Retreat listings state
   const [retreatListings, setRetreatListings] = useState<RetreatListing[]>([])
   const [editingListingId, setEditingListingId] = useState<string | null>(null)
@@ -251,7 +268,7 @@ export default function AdminDashboard() {
         .from('operator_booking_reports')
         .select('*, retreat_operators(operator_name), retreats(retreat_name)')
         .order('submitted_at', { ascending: false }),
-      supabase.from('retreat_operators').select('id, operator_name, email, auth_user_id').order('operator_name'),
+      supabase.from('retreat_operators').select('id, operator_name, email, auth_user_id, commission_rate').order('operator_name'),
       supabase.from('retreats').select('id, retreat_name, operator_id, location_town, bookretreats_url').order('retreat_name'),
       supabase
         .from('referral_links')
@@ -606,6 +623,72 @@ export default function AdminDashboard() {
     fetchData()
   }
 
+  // ─── File Booking (hybrid flow) ─────────────────
+
+  const resetFileBookingForm = () => {
+    setFbOperatorId('')
+    setFbRetreatId('')
+    setFbTravelerName('')
+    setFbTravelerEmail('')
+    setFbTravelDates('')
+    setFbDurationDays('')
+    setFbBookingAmount('')
+    setFbNotes('')
+  }
+
+  const fileBooking = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setFbMessage(null)
+
+    const opRow = operators.find(o => o.id === fbOperatorId)
+    const commissionRate = Number(opRow?.commission_rate ?? 0)
+
+    if (!fbOperatorId || !fbRetreatId || !fbTravelerName || !fbTravelDates || !fbBookingAmount) {
+      setFbMessage({ text: 'Please fill in all required fields', type: 'error' })
+      return
+    }
+
+    setFbSubmitting(true)
+
+    try {
+      const headers = await getAuthHeaders()
+      const res = await fetch('/api/create-booking', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          operator_id: fbOperatorId,
+          retreat_id: fbRetreatId,
+          traveler_name: fbTravelerName,
+          traveler_email: fbTravelerEmail || undefined,
+          travel_dates: fbTravelDates,
+          duration_days: fbDurationDays ? parseInt(fbDurationDays) : undefined,
+          booking_amount: parseFloat(fbBookingAmount),
+          commission_rate: commissionRate,
+          notes: fbNotes || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setFbMessage({ text: data.message || 'Booking filed and confirmation email sent', type: 'success' })
+        resetFileBookingForm()
+        setShowFileBookingForm(false)
+        fetchData()
+      } else {
+        setFbMessage({ text: data.error || 'Failed to file booking', type: 'error' })
+      }
+    } catch {
+      setFbMessage({ text: 'Network error', type: 'error' })
+    }
+    setFbSubmitting(false)
+    setTimeout(() => setFbMessage(null), 6000)
+  }
+
+  // Pre-compute available retreats for File Booking form based on selected operator
+  const fbAvailableRetreats = retreats.filter(r => r.operator_id === fbOperatorId)
+  const fbSelectedOperator = operators.find(o => o.id === fbOperatorId)
+  const fbCommissionRate = Number(fbSelectedOperator?.commission_rate ?? 0)
+  const fbCommissionOwed = fbBookingAmount ? (parseFloat(fbBookingAmount) * fbCommissionRate) / 100 : 0
+
   const approveApplication = async (appId: string) => {
     setApprovingAppId(appId)
     setApproveMessage(null)
@@ -666,7 +749,10 @@ export default function AdminDashboard() {
     .filter(b => b.commission_paid)
     .reduce((sum, b) => sum + Number(b.commission_owed), 0)
 
-  const pendingInvoices = bookings.filter(b => !b.invoice_sent)
+  // Only confirmed bookings can be invoiced
+  const pendingInvoices = bookings.filter(b => !b.invoice_sent && b.confirmation_status === 'confirmed')
+  // Admin-filed bookings waiting for operator confirmation
+  const pendingConfirmations = bookings.filter(b => b.confirmation_status === 'pending_confirmation')
 
   const filteredBookings = bookings.filter(b => {
     if (filterOperator && b.operator_id !== filterOperator) return false
@@ -1224,6 +1310,222 @@ export default function AdminDashboard() {
             </div>
           )}
         </section>
+
+        {/* ═══ File Booking (Hybrid Flow) ═══ */}
+        <section>
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <p className="eyebrow mb-3">✦ File a Booking</p>
+              <h3 className="font-serif-italic text-n-cream text-2xl">
+                Save your operator the paperwork
+              </h3>
+              <p className="text-n-cream-muted text-sm mt-1">
+                File a booking on behalf of an operator. They&apos;ll get a one-click confirmation email.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowFileBookingForm(!showFileBookingForm)}
+              className="px-4 py-2 text-sm bg-n-gold hover:bg-[#d4b96a] text-n-bg font-medium rounded-nomara transition-colors whitespace-nowrap"
+            >
+              {showFileBookingForm ? 'Close' : '+ File Booking'}
+            </button>
+          </div>
+
+          {fbMessage && (
+            <div className={`mb-4 rounded-nomara p-4 text-sm ${fbMessage.type === 'success' ? 'bg-n-surface border border-n-gold/30 text-n-cream' : 'bg-red-400/10 border border-red-400/30 text-red-400'}`}>
+              {fbMessage.type === 'success' && <span className="text-n-gold mr-2">✦</span>}
+              {fbMessage.text}
+            </div>
+          )}
+
+          {showFileBookingForm && (
+            <div className="bg-n-surface border border-n-border rounded-nomara p-6 md:p-8">
+              <form onSubmit={fileBooking} className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div>
+                    <label className="eyebrow block mb-2">
+                      Operator <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      value={fbOperatorId}
+                      onChange={e => {
+                        setFbOperatorId(e.target.value)
+                        setFbRetreatId('')
+                      }}
+                      required
+                    >
+                      <option value="">Select operator...</option>
+                      {operators.map(op => (
+                        <option key={op.id} value={op.id}>
+                          {op.operator_name}{op.commission_rate ? ` (${op.commission_rate}%)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="eyebrow block mb-2">
+                      Retreat <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      value={fbRetreatId}
+                      onChange={e => setFbRetreatId(e.target.value)}
+                      required
+                      disabled={!fbOperatorId}
+                    >
+                      <option value="">{fbOperatorId ? 'Select retreat...' : 'Select operator first'}</option>
+                      {fbAvailableRetreats.map(r => (
+                        <option key={r.id} value={r.id}>{r.retreat_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div>
+                    <label className="eyebrow block mb-2">
+                      Traveler Name <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={fbTravelerName}
+                      onChange={e => setFbTravelerName(e.target.value)}
+                      required
+                      placeholder="e.g. Sarah Johnson"
+                    />
+                  </div>
+                  <div>
+                    <label className="eyebrow block mb-2">Traveler Email</label>
+                    <input
+                      type="email"
+                      value={fbTravelerEmail}
+                      onChange={e => setFbTravelerEmail(e.target.value)}
+                      placeholder="Optional"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div className="md:col-span-2">
+                    <label className="eyebrow block mb-2">
+                      Travel Dates <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={fbTravelDates}
+                      onChange={e => setFbTravelDates(e.target.value)}
+                      required
+                      placeholder="e.g. May 12–18, 2026"
+                    />
+                  </div>
+                  <div>
+                    <label className="eyebrow block mb-2">Duration (days)</label>
+                    <input
+                      type="number"
+                      value={fbDurationDays}
+                      onChange={e => setFbDurationDays(e.target.value)}
+                      min={1}
+                      placeholder="7"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="eyebrow block mb-2">
+                    Booking Amount (USD) <span className="text-red-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-n-cream-muted">$</span>
+                    <input
+                      type="number"
+                      value={fbBookingAmount}
+                      onChange={e => setFbBookingAmount(e.target.value)}
+                      required
+                      min={0}
+                      step="0.01"
+                      placeholder="2,500.00"
+                      className="!pl-8"
+                    />
+                  </div>
+                </div>
+
+                {fbOperatorId && fbBookingAmount && (
+                  <div className="bg-n-bg border border-n-gold/30 rounded-nomara p-5">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="eyebrow text-[10px]">Commission Rate</span>
+                      <span className="text-n-cream font-medium">{fbCommissionRate}%</span>
+                    </div>
+                    <div className="h-[1px] bg-n-border mb-3" />
+                    <div className="flex justify-between items-center">
+                      <span className="eyebrow text-[10px]">Commission Owed</span>
+                      <span className="text-n-gold text-2xl font-serif-italic">
+                        {formatCurrency(fbCommissionOwed)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="eyebrow block mb-2">Notes</label>
+                  <textarea
+                    value={fbNotes}
+                    onChange={e => setFbNotes(e.target.value)}
+                    rows={3}
+                    placeholder="Any context for the operator..."
+                    className="resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={fbSubmitting}
+                  className="w-full bg-n-gold hover:bg-[#d4b96a] disabled:opacity-50 text-n-bg font-medium py-4 rounded-nomara transition-colors text-[15px]"
+                >
+                  {fbSubmitting ? 'Filing booking...' : 'File Booking & Send Confirmation Email'}
+                </button>
+              </form>
+            </div>
+          )}
+        </section>
+
+        {/* ═══ Pending Operator Confirmations ═══ */}
+        {pendingConfirmations.length > 0 && (
+          <section>
+            <p className="eyebrow mb-3">✦ Awaiting Confirmation</p>
+            <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+              Waiting for operator ({pendingConfirmations.length})
+            </h3>
+            <div className="bg-n-surface border border-n-border rounded-nomara overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-n-border">
+                      <th className="eyebrow text-[10px] text-left py-3 px-5 font-medium">Operator</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Retreat</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Traveler</th>
+                      <th className="eyebrow text-[10px] text-left py-3 px-3 font-medium">Dates</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Amount</th>
+                      <th className="eyebrow text-[10px] text-right py-3 px-3 font-medium">Commission</th>
+                      <th className="eyebrow text-[10px] text-center py-3 px-5 font-medium">Filed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingConfirmations.map(b => (
+                      <tr key={b.id} className="border-b border-n-border/50 last:border-0">
+                        <td className="py-3.5 px-5 text-n-cream font-medium">{b.retreat_operators?.operator_name || '—'}</td>
+                        <td className="py-3.5 px-3 text-n-cream-muted max-w-[140px] truncate">{b.retreats?.retreat_name || '—'}</td>
+                        <td className="py-3.5 px-3 text-n-cream">{b.traveler_name}</td>
+                        <td className="py-3.5 px-3 text-n-cream-muted">{b.travel_dates}</td>
+                        <td className="py-3.5 px-3 text-right text-n-cream">{formatCurrency(b.booking_amount)}</td>
+                        <td className="py-3.5 px-3 text-right text-n-gold font-medium">{formatCurrency(b.commission_owed)}</td>
+                        <td className="py-3.5 px-5 text-center text-n-cream-muted">{daysSince(b.submitted_at)}d ago</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* ═══ All Bookings (existing + "From link?" column) ═══ */}
         <section>

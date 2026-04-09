@@ -24,10 +24,14 @@ interface BookingReport {
   id: string
   traveler_name: string
   travel_dates: string
+  duration_days: number | null
   booking_amount: number
+  commission_rate: number
   commission_owed: number
   commission_paid: boolean
   submitted_at: string
+  confirmation_status: 'pending_confirmation' | 'confirmed' | 'disputed'
+  created_by: 'admin' | 'operator' | null
   retreats: { retreat_name: string } | null
   retreat_operators: { operator_name: string } | null
 }
@@ -86,6 +90,9 @@ export default function OperatorPortal() {
   const [pastBookings, setPastBookings] = useState<BookingReport[]>([])
   const [referralLinks, setReferralLinks] = useState<ReferralLink[]>([])
   const [showBookingForm, setShowBookingForm] = useState(false)
+  const [confirmingBookingId, setConfirmingBookingId] = useState<string | null>(null)
+  const [disputingBookingId, setDisputingBookingId] = useState<string | null>(null)
+  const [disputeReason, setDisputeReason] = useState('')
 
   // Retreat listing state
   const [retreatListings, setRetreatListings] = useState<RetreatListing[]>([])
@@ -123,7 +130,7 @@ export default function OperatorPortal() {
       supabase.from('retreat_operators').select('id, operator_name, commission_rate'),
       supabase
         .from('operator_booking_reports')
-        .select('id, traveler_name, travel_dates, booking_amount, commission_owed, commission_paid, submitted_at, retreats(retreat_name), retreat_operators(operator_name)')
+        .select('id, traveler_name, travel_dates, duration_days, booking_amount, commission_rate, commission_owed, commission_paid, submitted_at, confirmation_status, created_by, retreats(retreat_name), retreat_operators(operator_name)')
         .order('submitted_at', { ascending: false }),
       supabase
         .from('retreats')
@@ -176,6 +183,28 @@ export default function OperatorPortal() {
 
     return () => subscription.unsubscribe()
   }, [fetchData])
+
+  const handleConfirmBooking = async (bookingId: string, action: 'confirm' | 'dispute', reason?: string) => {
+    setConfirmingBookingId(bookingId)
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch('/api/confirm-booking', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({ booking_id: bookingId, action, dispute_reason: reason }),
+    })
+    setConfirmingBookingId(null)
+    if (res.ok) {
+      setDisputingBookingId(null)
+      setDisputeReason('')
+      fetchData()
+    } else {
+      const data = await res.json()
+      alert(data.error || 'Something went wrong')
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -468,13 +497,95 @@ export default function OperatorPortal() {
           </p>
         </div>
 
+        {/* ═══ Action Required: Pending Confirmations ═══ */}
+        {(() => {
+          const pending = pastBookings.filter(b => b.confirmation_status === 'pending_confirmation')
+          if (pending.length === 0) return null
+          return (
+            <section>
+              <p className="eyebrow mb-3">✦ Action Required</p>
+              <h3 className="font-serif-italic text-n-cream text-2xl mb-5">
+                Please confirm these bookings
+              </h3>
+              <div className="space-y-4">
+                {pending.map(b => (
+                  <div key={b.id} className="bg-n-surface border border-n-gold/40 rounded-nomara p-5 md:p-6">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
+                      <div className="flex-1">
+                        <p className="text-n-cream font-medium text-[15px] mb-1">{b.traveler_name}</p>
+                        <p className="text-n-cream-muted text-sm mb-2">
+                          {b.retreats?.retreat_name} · {b.travel_dates}{b.duration_days ? ` · ${b.duration_days} days` : ''}
+                        </p>
+                        <div className="flex items-center gap-4 text-sm">
+                          <span className="text-n-cream">
+                            <span className="text-n-cream-muted">Booking:</span> {formatCurrency(b.booking_amount)}
+                          </span>
+                          <span className="text-n-gold font-medium">
+                            <span className="text-n-cream-muted font-normal">Commission:</span> {formatCurrency(b.commission_owed)}
+                          </span>
+                        </div>
+                      </div>
+                      {disputingBookingId !== b.id && (
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            onClick={() => handleConfirmBooking(b.id, 'confirm')}
+                            disabled={confirmingBookingId === b.id}
+                            className="px-4 py-2 bg-n-gold hover:bg-[#d4b96a] disabled:opacity-50 text-n-bg text-sm font-medium rounded-nomara transition-colors whitespace-nowrap"
+                          >
+                            {confirmingBookingId === b.id ? '...' : '✓ Confirm'}
+                          </button>
+                          <button
+                            onClick={() => { setDisputingBookingId(b.id); setDisputeReason('') }}
+                            className="px-4 py-2 border border-n-cream/20 text-n-cream-muted hover:text-n-cream text-sm rounded-nomara transition-colors whitespace-nowrap"
+                          >
+                            Flag
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {disputingBookingId === b.id && (
+                      <div className="border-t border-n-border pt-4 mt-4">
+                        <label className="eyebrow block mb-2 text-[10px]">What&apos;s wrong?</label>
+                        <textarea
+                          value={disputeReason}
+                          onChange={e => setDisputeReason(e.target.value)}
+                          rows={3}
+                          placeholder="e.g. The amount is different, dates are wrong, traveler didn't show up..."
+                          className="resize-none mb-3"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleConfirmBooking(b.id, 'dispute', disputeReason)}
+                            disabled={confirmingBookingId === b.id || !disputeReason.trim()}
+                            className="px-4 py-2 bg-n-gold hover:bg-[#d4b96a] disabled:opacity-50 text-n-bg text-sm font-medium rounded-nomara transition-colors"
+                          >
+                            {confirmingBookingId === b.id ? 'Submitting...' : 'Submit'}
+                          </button>
+                          <button
+                            onClick={() => { setDisputingBookingId(null); setDisputeReason('') }}
+                            className="px-4 py-2 border border-n-cream/20 text-n-cream-muted hover:text-n-cream text-sm rounded-nomara transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )
+        })()}
+
         {/* ═══ Hero KPI Cards ═══ */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {(() => {
             const totalClicks = referralLinks.reduce((sum, l) => sum + (l.total_clicks || 0), 0)
-            const totalBookings = pastBookings.length
-            const totalReferred = pastBookings.reduce((sum, b) => sum + Number(b.booking_amount), 0)
-            const totalCommission = pastBookings.reduce((sum, b) => sum + Number(b.commission_owed), 0)
+            // KPIs only count confirmed bookings (not pending_confirmation or disputed)
+            const confirmedBookings = pastBookings.filter(b => b.confirmation_status === 'confirmed')
+            const totalBookings = confirmedBookings.length
+            const totalReferred = confirmedBookings.reduce((sum, b) => sum + Number(b.booking_amount), 0)
+            const totalCommission = confirmedBookings.reduce((sum, b) => sum + Number(b.commission_owed), 0)
             return (
               <>
                 <KPICard label="Link Clicks" value={totalClicks.toString()} />
@@ -774,7 +885,7 @@ export default function OperatorPortal() {
             </button>
           </div>
 
-          {pastBookings.length === 0 ? (
+          {pastBookings.filter(b => b.confirmation_status !== 'pending_confirmation').length === 0 ? (
             <div className="bg-n-surface border border-n-border rounded-nomara p-8 text-center">
               <p className="text-n-cream-muted text-sm">
                 No bookings reported yet. After a Nomara-referred traveler completes their stay, report it here to receive your commission.
@@ -794,7 +905,7 @@ export default function OperatorPortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pastBookings.map(b => (
+                    {pastBookings.filter(b => b.confirmation_status !== 'pending_confirmation').map(b => (
                       <tr key={b.id} className="border-b border-n-border/50 last:border-0">
                         <td className="py-3.5 px-5 text-n-cream font-medium">{b.traveler_name}</td>
                         <td className="py-3.5 px-3 text-n-cream-muted">{b.travel_dates}</td>
