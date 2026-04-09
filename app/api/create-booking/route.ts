@@ -4,7 +4,7 @@ import { verifyAdmin } from '@/lib/verify-admin'
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_Xo7c99AE_AF5mgpVnib668RcUEgCkYSwu'
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://partners.nomaratravel.com'
-const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(2).png'
+const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(3).png'
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)

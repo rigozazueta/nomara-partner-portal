@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     const approvalHtml = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; background: #0a1a0f; color: #f5f0e8; padding: 40px 30px; border-radius: 12px;">
         <div style="text-align: center; margin-bottom: 30px;">
-          <img src="https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(2).png" alt="Nomara" width="180" style="display: block; margin: 0 auto; max-width: 180px; height: auto;" />
+          <img src="https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(3).png" alt="Nomara" width="180" style="display: block; margin: 0 auto; max-width: 180px; height: auto;" />
           <div style="width: 50px; height: 1px; background: #C9A84C; margin: 12px auto;"></div>
           <p style="color: #C9A84C; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; margin: 0;">Welcome, Partner</p>
         </div>

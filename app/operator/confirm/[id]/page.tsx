@@ -6,7 +6,7 @@ import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
 
-const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(2).png'
+const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(3).png'
 
 interface Booking {
   id: string
