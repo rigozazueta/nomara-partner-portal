@@ -1,42 +1,113 @@
-# Nomara Gmail Email Templates
+# Nomara Email Templates
 
-Pre-built, branded email templates for common partner communications. All templates use the Nomara dark-green + gold aesthetic and pull the logo from Supabase storage.
+Pre-built templates for partner communications across the full lifecycle. Some are plain-text replies (for natural cold outreach follow-ups), others are branded HTML (for transactional and welcome emails).
 
-## How to use in Gmail
+---
 
-1. Enable Gmail templates: **Settings → See all settings → Advanced → Templates: Enable**
-2. Open a new compose window
-3. Copy the HTML content from the `.html` file you want
-4. Paste it into the Gmail compose body (Gmail will preserve the formatting)
-5. Customize the placeholders (`[TRAVELER NAME]`, `[RETREAT NAME]`, etc.)
-6. Click the three-dot menu → **Templates → Save draft as template → Save as new template**
-7. Next time you compose, click the three-dot menu → **Templates → [your saved template]**
+## The full sequence — from cold outreach to active partner
 
-**Note:** Gmail's template feature strips some inline CSS. For best results, use these templates by copy-pasting the HTML directly into compose each time, OR send them via Resend (automated) from the portal.
+```
+COLD OUTREACH (Instantly campaign)
+        │
+        │ Operator replies...
+        ▼
+┌───────────────────────────────────────────┐
+│   00a, 00b, or 00c (plain text replies)   │  ← USE THESE FOR REPLIES
+└───────────────────────────────────────────┘
+        │
+        │ They confirm terms and want to proceed
+        ▼
+┌───────────────────────────────────────────┐
+│   01-operator-welcome.html (HTML)          │  ← OFFICIAL ONBOARDING
+└───────────────────────────────────────────┘
+        │
+        │ Partner is now active, you start sending leads
+        ▼
+┌───────────────────────────────────────────┐
+│   02 or 03 (route travelers to them)       │
+└───────────────────────────────────────────┘
+        │
+        │ A traveler completes their stay
+        ▼
+┌───────────────────────────────────────────┐
+│   04 (auto-sent by portal) → 05 (invoice)  │
+└───────────────────────────────────────────┘
+        │
+        │ 30-60 days quiet?
+        ▼
+┌───────────────────────────────────────────┐
+│   06 (re-engagement check-in)              │
+└───────────────────────────────────────────┘
+```
 
-## Templates included
+---
 
-| File | When to use | Subject line |
-|------|-------------|--------------|
-| `01-operator-welcome.html` | When a new operator confirms partnership terms | Welcome to the Nomara Partner Network |
-| `02-referral-intro-to-operator.html` | When you're sending a warm lead to an operator (WhatsApp path) | New Nomara traveler interested in [RETREAT] |
-| `03-referral-intro-to-traveler.html` | When you're sharing a retreat link with a traveler | Your Nomara retreat recommendation — [RETREAT] |
-| `04-booking-confirmation-request.html` | When filing a booking for an operator (they need to confirm) | Please confirm a Nomara booking — [TRAVELER] |
-| `05-invoice-email.html` | When the operator has confirmed and you're invoicing | Commission invoice — [RETREAT], [MONTH] |
+## Reply templates (plain text — for cold outreach replies)
+
+These are the FIRST THINGS you send when an operator replies to your Instantly campaign. Plain text feels personal, lands in inbox better, and matches the tone of a real human reply.
+
+| File | Use when | Tone |
+|------|----------|------|
+| `00a-reply-interested.txt` | Operator replied "interested, tell me more" | Warm, informative, ends with a clear next step |
+| `00b-reply-diligence-questions.txt` | Operator asked specific questions (rate, payment, volume, exclusivity) | Scannable Q&A, transparent, no fluff |
+| `00c-reply-polite-decline.txt` | Operator declined politely | Short, gracious, leaves door open |
+
+**How to use:**
+1. Open the `.txt` file
+2. Copy the content (skip the header notes)
+3. Paste directly into your Gmail reply
+4. Edit placeholders and personalize the first line based on what they actually said
+5. Send
+
+---
+
+## Branded HTML templates (for everything after they sign on)
+
+These use the dark green + gold Nomara aesthetic with the white logo. Use them for official partnership communications.
+
+| File | Use when | Subject line |
+|------|----------|--------------|
+| `01-operator-welcome.html` | Operator confirms terms — official welcome to the network | Welcome to the Nomara Partner Network |
+| `02-referral-intro-to-operator.html` | Sending a warm lead to operator (WhatsApp path) | New Nomara traveler interested in [RETREAT] |
+| `03-referral-intro-to-traveler.html` | Sharing a retreat link with a traveler | Your Nomara retreat recommendation — [RETREAT] |
+| `04-booking-confirmation-request.html` | Filing a booking for an operator (they need to confirm) | Please confirm a Nomara booking — [TRAVELER] |
+| `05-invoice-email.html` | Operator has confirmed, you're invoicing | Commission invoice — [RETREAT], [MONTH] |
 | `06-followup-checkin.html` | 30-60 day check-in with quiet partners | Quick check-in from Nomara |
 
-## Placeholders to replace
+**How to use HTML templates in Gmail:**
+
+1. Enable Gmail templates: **Settings → See all settings → Advanced → Templates: Enable**
+2. Open the `.html` file in a browser or text editor
+3. Copy the entire HTML content (everything inside and including the outer `<div>`)
+4. Paste it into the Gmail compose body (Gmail preserves the inline CSS)
+5. Replace the `[PLACEHOLDERS]` with actual content
+6. Save as template: **three-dot menu → Templates → Save draft as template → Save as new template**
+7. Next time, click **Templates → [your saved template]** to load
+
+**Note:** Gmail strips some CSS. For perfect rendering every time, the portal sends 04 and 05 automatically via Resend — that's the recommended path for transactional emails.
+
+---
+
+## Placeholder cheat sheet
 
 All templates use these placeholders — replace before sending:
-- `[FIRST NAME]` — recipient first name
-- `[TRAVELER NAME]` — full name of traveler
-- `[TRAVELER FIRST NAME]` — traveler's first name only
-- `[RETREAT NAME]` — retreat name
-- `[OPERATOR NAME]` — operator/business name
-- `[TRAVEL DATES]` — e.g. "May 12–18, 2026"
-- `[BOOKING AMOUNT]` — e.g. "$2,786"
-- `[COMMISSION AMOUNT]` — e.g. "$417.90"
-- `[COMMISSION RATE]` — e.g. "15%"
-- `[REFERRAL LINK]` — full URL from admin dashboard
-- `[CONFIRM LINK]` — full URL to confirmation page
-- `[INVOICE LINK]` — payment link (Stripe, Wise, etc.)
+
+| Placeholder | Example |
+|-------------|---------|
+| `[FIRST NAME]` | Solange |
+| `[OPERATOR NAME]` | Surf and Yoga Costa Rica |
+| `[BUSINESS NAME]` | (same as OPERATOR NAME) |
+| `[RETREAT NAME]` | The Soul Surf & Yoga Retreat |
+| `[TRAVELER NAME]` | Sarah Johnson |
+| `[TRAVELER FIRST NAME]` | Sarah |
+| `[TRAVEL DATES]` | May 12–18, 2026 |
+| `[BOOKING AMOUNT]` | $2,786 |
+| `[COMMISSION RATE]` | 15% |
+| `[COMMISSION AMOUNT]` | $417.90 |
+| `[REFERRAL LINK]` | URL from admin → Referral Links |
+| `[CONFIRM LINK]` | Auto-generated by portal |
+| `[INVOICE LINK]` | Stripe, Wise, or bank details |
+| `[INVOICE NUMBER]` | NOMARA-2026-04-001 |
+| `[INVOICE DATE]` | 2026-04-09 |
+| `[DUE DATE]` | 2026-05-09 |
+| `[SEASON OR CURRENT MONTH]` | spring season / April |
