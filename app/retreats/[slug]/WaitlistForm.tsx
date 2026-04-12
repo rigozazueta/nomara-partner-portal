@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { getReferralAttribution } from '@/lib/referral-cookie'
 
 interface Props {
   retreatId: string
@@ -24,6 +25,8 @@ export default function WaitlistForm({ retreatId, retreatName }: Props) {
     setError('')
     setSubmitting(true)
 
+    const referral = getReferralAttribution()
+
     const { error: insertError } = await supabase.from('retreat_waitlists').insert({
       retreat_id: retreatId,
       full_name: fullName,
@@ -32,6 +35,7 @@ export default function WaitlistForm({ retreatId, retreatName }: Props) {
       travel_dates: travelDates || null,
       party_size: partySize ? parseInt(partySize) : null,
       message: message || null,
+      referral_link_id: referral?.referral_link_id || null,
     })
 
     if (insertError) {

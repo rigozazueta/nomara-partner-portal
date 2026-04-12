@@ -151,7 +151,9 @@ interface RetreatWaitlist {
   message: string | null
   status: string
   created_at: string
+  referral_link_id: string | null
   retreats: { retreat_name: string } | null
+  referral_links: { slug: string; lead_name: string } | null
 }
 
 // ─── Component ───────────────────────────────────────
@@ -282,7 +284,7 @@ export default function AdminDashboard() {
         .order('listing_submitted_at', { ascending: false, nullsFirst: false }),
       supabase
         .from('retreat_waitlists')
-        .select('*, retreats(retreat_name)')
+        .select('*, retreats(retreat_name), referral_links(slug, lead_name)')
         .order('created_at', { ascending: false }),
       supabase
         .from('retreat_reviews')
@@ -2271,7 +2273,14 @@ export default function AdminDashboard() {
                   <tbody>
                     {waitlists.map(w => (
                       <tr key={w.id} className="border-b border-n-border/50 last:border-0">
-                        <td className="py-3.5 px-5 text-n-cream font-medium">{w.full_name}</td>
+                        <td className="py-3.5 px-5 text-n-cream font-medium">
+                          {w.full_name}
+                          {w.referral_links && (
+                            <span className="inline-block bg-n-gold/10 border border-n-gold/30 text-n-gold text-[10px] px-2 py-0.5 rounded-full ml-2">
+                              via /go/{w.referral_links.slug}
+                            </span>
+                          )}
+                        </td>
                         <td className="py-3.5 px-3">
                           <a href={`mailto:${w.email}`} className="text-n-gold hover:underline text-sm">{w.email}</a>
                         </td>

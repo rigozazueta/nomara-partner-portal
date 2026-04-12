@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
+import { getReferralAttribution } from '@/lib/referral-cookie'
 
 const LOGO_URL = 'https://ymluewfhvthmvaaupspz.supabase.co/storage/v1/object/public/NomaraImages/Nomara%20Logo%20(YouTube%20Thumbnail)%20(3).png'
 
@@ -54,12 +55,16 @@ export default function Home() {
     setSubmitting(true)
     setFormError('')
 
+    const referral = getReferralAttribution()
+
     const { error } = await supabase.from('partner_applications').insert({
       contact_name: formData.contact_name,
       business_name: formData.business_name,
       email: formData.email,
       location: formData.location || null,
       message: formData.message || null,
+      referral_link_id: referral?.referral_link_id || null,
+      referral_slug: referral?.slug || null,
     })
 
     if (error) {
